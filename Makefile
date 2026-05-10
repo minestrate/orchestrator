@@ -89,11 +89,11 @@ docker/run:
 
 ## push: push changes to the remote Git repository
 .PHONY: push
-push: confirm audit no-dirty
+push: audit no-dirty
 	git push
 
 ## production/deploy: build optimized binary and compress
 .PHONY: production/deploy
-production/deploy: confirm audit no-dirty
+production/deploy: audit no-dirty
 	GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o=/tmp/bin/linux_amd64/${binary_name} ${main_package_path}
 	upx -5 /tmp/bin/linux_amd64/${binary_name}
