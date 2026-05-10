@@ -16,7 +16,7 @@ const (
 	StateStopped  ServerState = "stopped"
 )
 
-// ServerEvent representsa trigger that cause a transition
+// ServerEvent represents a trigger that causes a transition
 type ServerEvent string
 
 const (
@@ -33,11 +33,14 @@ type ErrInvalidTransition struct {
 }
 
 func (e *ErrInvalidTransition) Error() string {
-	return fmt.Sprintf("invalid transaction from=%s event=%s", e.From, e.Event)
+	return fmt.Sprintf("invalid transition from=%s event=%s", e.From, e.Event)
 }
 
+// Server holds the state of a server record and ensures that transitions
+// follow the defined state machine. No mutation outside the Transition
+// method is permitted.
 type Server struct {
-	mutex sync.RWMutex
+	mutex sync.Mutex
 	state ServerState
 }
 
@@ -48,8 +51,8 @@ func NewServer() *Server {
 }
 
 func (s *Server) State() ServerState {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	return s.state
 }
 
