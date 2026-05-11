@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -40,13 +41,23 @@ func (e *ErrInvalidTransition) Error() string {
 // follow the defined state machine. No mutation outside the Transition
 // method is permitted.
 type Server struct {
-	mutex sync.Mutex
-	state ServerState
+	mutex   sync.Mutex
+	ID      string      `json:"id"`
+	Game    string      `json:"game"`
+	Players int         `json:"players"`
+	Address string      `json:"address"`
+	Port    int         `json:"port"`
+	state   ServerState
 }
 
-func NewServer() *Server {
+func NewServer(id, game string, players int, address string, port int) *Server {
 	return &Server{
-		state: StatePending,
+		ID:      id,
+		Game:    game,
+		Players: players,
+		Address: address,
+		Port:    port,
+		state:   StatePending,
 	}
 }
 
@@ -54,6 +65,27 @@ func (s *Server) State() ServerState {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return s.state
+}
+
+func (s *Server) MarshalJSON() ([]byte, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return json.Marshal(struct {
+		ID      string      `json:"id"`
+		Game    string      `json:"game"`
+		Players int         `json:"players"`
+		Address string      `json:"address"`
+		Port    int         `json:"port"`
+		State   ServerState `json:"state"`
+	}{
+		ID:      s.ID,
+		Game:    s.Game,
+		Players: s.Players,
+		Address: s.Address,
+		Port:    s.Port,
+		State:   s.state,
+	})
 }
 
 func (s *Server) Transition(event ServerEvent) error {
