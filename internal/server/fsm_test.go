@@ -34,7 +34,8 @@ func TestValidTransitions(t *testing.T) {
 	for fromState, events := range validTransitions {
 		for event, expectedState := range events {
 			t.Run(string(fromState)+"_to_"+string(expectedState), func(t *testing.T) {
-				s := &Server{state: fromState}
+				s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+				s.state = fromState
 				err := s.Transition(event)
 
 				if err != nil {
@@ -58,7 +59,8 @@ func TestInvalidTransitions(t *testing.T) {
 			}
 
 			t.Run("invalid_"+string(fromState)+"_via_"+string(event), func(t *testing.T) {
-				s := &Server{state: fromState}
+				s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+				s.state = fromState
 				err := s.Transition(event)
 
 				if err == nil {

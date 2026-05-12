@@ -18,6 +18,28 @@ type Config struct {
 		JWTSecret string `yaml:"jwt_secret"`
 		TokenTTL  int    `yaml:"token_ttl"`
 	} `yaml:"auth"`
+
+	Docker struct {
+		Socket      string  `yaml:"socket"`
+		Image       string  `yaml:"image"`
+		CPULimit    float64 `yaml:"cpu_limit"`
+		MemoryLimit string  `yaml:"memory_limit"`
+	} `yaml:"docker"`
+
+	Orchestrator struct {
+		Workers      int `yaml:"workers"`
+		MaxServers   int `yaml:"max_servers"`
+		StartTimeout int `yaml:"start_timeout"`
+	} `yaml:"orchestrator"`
+
+	Ports struct {
+		RangeStart int `yaml:"range_start"`
+		RangeEnd   int `yaml:"range_end"`
+	} `yaml:"ports"`
+
+	Network struct {
+		SubnetBlock string `yaml:"subnet_block"`
+	} `yaml:"network"`
 }
 
 func Load(path string) (*Config, error) {

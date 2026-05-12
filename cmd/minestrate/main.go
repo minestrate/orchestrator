@@ -14,6 +14,7 @@ import (
 	"github.com/mitsuakki/minestrate/internal/api"
 	"github.com/mitsuakki/minestrate/internal/auth"
 	"github.com/mitsuakki/minestrate/internal/middleware"
+	"github.com/mitsuakki/minestrate/internal/server"
 )
 
 func main() {
@@ -59,13 +60,18 @@ func main() {
 
 	r := chi.NewRouter()
 
+	orchestrator := server.NewOrchestrator(cfg)
+	orchestrator.StartWorkers()
+	h := api.NewHandler(orchestrator)
+
 	// ToDo : Public routes
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.Auth.JWTSecret))
 
-		r.Get("/servers", api.ListServers)
-		r.With(middleware.RequireScope("server:create")).Post("/servers", api.CreateServer)
+		r.Get("/servers", h.ListServers)
+		r.Get("/servers/{id}", h.GetServer)
+		r.With(middleware.RequireScope("server:create")).Post("/servers", h.CreateServer)
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

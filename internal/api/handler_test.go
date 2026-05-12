@@ -1,77 +1,107 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/internal/server"
 )
 
+func setupTestHandler() *Handler {
+	cfg := &config.Config{}
+	cfg.Orchestrator.MaxServers = 10
+	cfg.Orchestrator.Workers = 1
+	cfg.Ports.RangeStart = 19132
+	cfg.Ports.RangeEnd = 19142
+
+	o := server.NewOrchestrator(cfg)
+	return NewHandler(o)
+}
+
 func TestCreateServer(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/servers", nil)
-	w := httptest.NewRecorder()
+	h := setupTestHandler()
+	
+	t.Run("ValidRequest", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "skywars", Players: 8}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body))
+		w := httptest.NewRecorder()
 
-	CreateServer(w, req)
+		h.CreateServer(w, req)
 
-	res := w.Result()
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Fatal(err)
+		res := w.Result()
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusAccepted {
+			t.Fatalf("expected status %d, got %d", http.StatusAccepted, res.StatusCode)
 		}
-	}(res.Body)
 
-	if res.StatusCode != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, res.StatusCode)
-	}
+		var respBody ServerResponse
+		if err := json.NewDecoder(res.Body).Decode(&respBody); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
 
-	contentType := res.Header.Get("Content-Type")
-	if contentType != "application/json" {
-		t.Fatalf("expected content-type application/json, got %s", contentType)
-	}
+		if respBody.Game != "skywars" || respBody.Players != 8 {
+			t.Fatalf("unexpected response body: %+v", respBody)
+		}
+	})
 
-	var body map[string]string
+	t.Run("InvalidGame", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "", Players: 8}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body))
+		w := httptest.NewRecorder()
 
-	err := json.NewDecoder(res.Body).Decode(&body)
-	if err != nil {
-		t.Fatalf("failed to decode response body: %v", err)
-	}
+		h.CreateServer(w, req)
 
-	expected := "server created"
+		if w.Result().StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+		}
+	})
 
-	if body["status"] != expected {
-		t.Fatalf("expected status %q, got %q", expected, body["status"])
-	}
+	t.Run("InvalidPlayers", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "skywars", Players: 0}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body))
+		w := httptest.NewRecorder()
+
+		h.CreateServer(w, req)
+
+		if w.Result().StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+		}
+	})
 }
 
 func TestListServers(t *testing.T) {
+	h := setupTestHandler()
+	
+	// Create one
+	_, _ = h.orchestrator.CreateServer("skywars", 8)
+
 	req := httptest.NewRequest(http.MethodGet, "/servers", nil)
 	w := httptest.NewRecorder()
 
-	ListServers(w, req)
+	h.ListServers(w, req)
 
 	res := w.Result()
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}(res.Body)
+	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("Expected status OK, got %d", res.StatusCode)
 	}
 
-	contentType := res.Header.Get("Content-Type")
-	if contentType != "application/json" {
-		t.Fatalf("Expected Content-Type application/json, got %s", contentType)
-	}
-
-	var body []string
+	var body []ServerResponse
 	err := json.NewDecoder(res.Body).Decode(&body)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
+	}
+
+	if len(body) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(body))
 	}
 }
