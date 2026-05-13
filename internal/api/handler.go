@@ -72,3 +72,17 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ToServerResponse(s))
 }
 
+func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.orchestrator.StopServer(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
