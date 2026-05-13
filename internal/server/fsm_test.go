@@ -21,9 +21,11 @@ var validTransitions = map[ServerState]map[ServerEvent]ServerState{
 	StateStarting: {
 		EventRun:     StateRunning,
 		EventTimeout: StateStopped,
+		EventStop:    StateStopped,
 	},
 	StateRunning: {
 		EventDrain: StateDraining,
+		EventStop:  StateStopped,
 	},
 	StateDraining: {
 		EventStop: StateStopped,
