@@ -16,6 +16,7 @@ var allEvents = []ServerEvent{
 var validTransitions = map[ServerState]map[ServerEvent]ServerState{
 	StatePending: {
 		EventStart: StateStarting,
+		EventStop:  StateStopped,
 	},
 	StateStarting: {
 		EventRun:     StateRunning,

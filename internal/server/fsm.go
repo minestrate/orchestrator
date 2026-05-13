@@ -98,6 +98,10 @@ func (s *Server) Transition(event ServerEvent) error {
 				s.state = StateStarting
 				return nil
 			}
+			if event == EventStop {
+				s.state = StateStopped
+				return nil
+			}
 
 		case StateStarting:
 			if event == EventRun {
