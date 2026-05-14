@@ -35,7 +35,7 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := h.orchestrator.CreateServer(req.Game, req.Players)
+	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players)
 	if err != nil {
 		if errors.Is(err, server.ErrMaxServersReached) ||
 			errors.Is(err, server.ErrNoPortsAvailable) ||
@@ -74,7 +74,7 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.orchestrator.StopServer(id); err != nil {
+	if err := h.orchestrator.StopServer(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

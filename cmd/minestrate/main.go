@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,12 +11,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/moby/moby/api/types/network"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/api"
 	"github.com/mitsuakki/minestrate/internal/auth"
 	"github.com/mitsuakki/minestrate/internal/middleware"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
+
+type mockDockerClient struct{}
+
+func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error) {
+	return network.CreateResponse{ID: name}, nil
+}
+func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
+	return nil
+}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
@@ -60,7 +71,10 @@ func main() {
 
 	r := chi.NewRouter()
 
-	orchestrator := server.NewOrchestrator(cfg)
+	orchestrator, err := server.NewOrchestrator(cfg, &mockDockerClient{})
+	if err != nil {
+		log.Fatalf("failed to create orchestrator: %v", err)
+	}
 	orchestrator.StartWorkers()
 	h := api.NewHandler(orchestrator)
 

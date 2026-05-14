@@ -38,7 +38,10 @@ type Config struct {
 	} `yaml:"ports"`
 
 	Network struct {
-		SubnetBlock string `yaml:"subnet_block"`
+		Mode           string `yaml:"mode"` // "simple" or "isolated"
+		SubnetBlock    string `yaml:"subnet_block"`
+		DefaultNetwork string `yaml:"default_network"`
+		EnableFallback bool   `yaml:"enable_fallback"`
 	} `yaml:"network"`
 }
 

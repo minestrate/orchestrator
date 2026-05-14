@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,11 +10,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/network"
 	"github.com/go-chi/chi/v5"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/api"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
+
+type mockDockerClient struct{}
+
+func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error) {
+	return network.CreateResponse{ID: name}, nil
+}
+func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
+	return nil
+}
 
 func TestServerLifecycle_Integration(t *testing.T) {
 	// Note: The address returned is the host IP, not the container IP.
@@ -25,8 +36,13 @@ func TestServerLifecycle_Integration(t *testing.T) {
 	cfg.Orchestrator.Workers = 2
 	cfg.Ports.RangeStart = 20000
 	cfg.Ports.RangeEnd = 20100
+	cfg.Network.Mode = "simple"
+	cfg.Network.DefaultNetwork = "test-net"
 
-	orchestrator := server.NewOrchestrator(cfg)
+	orchestrator, err := server.NewOrchestrator(cfg, &mockDockerClient{})
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
 	orchestrator.StartWorkers()
 	h := api.NewHandler(orchestrator)
 

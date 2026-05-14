@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -15,12 +16,17 @@ func mockConfig() *config.Config {
 	cfg.Orchestrator.Workers = 1
 	cfg.Ports.RangeStart = 25565
 	cfg.Ports.RangeEnd = 25566
+	cfg.Network.Mode = "simple"
+	cfg.Network.DefaultNetwork = "test-net"
 	return cfg
 }
 
 func TestNewOrchestrator(t *testing.T) {
 	cfg := mockConfig()
-	o := NewOrchestrator(cfg)
+	o, err := NewOrchestrator(cfg, &mockDockerClient{})
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
 
 	if o == nil {
 		t.Fatal("expected orchestrator to be non-nil")
@@ -35,9 +41,9 @@ func TestNewOrchestrator(t *testing.T) {
 
 func TestCreateServer(t *testing.T) {
 	cfg := mockConfig()
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
-	s1, err := o.CreateServer("minecraft", 10)
+	s1, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("unexpected error creating server: %v", err)
 	}
@@ -48,7 +54,7 @@ func TestCreateServer(t *testing.T) {
 		t.Fatalf("server properties mismatch: %+v", s1)
 	}
 
-	s2, err := o.CreateServer("minecraft", 5)
+	s2, err := o.CreateServer(context.Background(), "minecraft", 5)
 	if err != nil {
 		t.Fatalf("unexpected error creating second server: %v", err)
 	}
@@ -57,7 +63,7 @@ func TestCreateServer(t *testing.T) {
 	}
 
 	// Max servers reached
-	s3, err := o.CreateServer("minecraft", 5)
+	s3, err := o.CreateServer(context.Background(), "minecraft", 5)
 	if !errors.Is(err, ErrMaxServersReached) {
 		t.Fatalf("expected ErrMaxServersReached, got %v", err)
 	}
@@ -69,19 +75,19 @@ func TestCreateServer(t *testing.T) {
 func TestCreateServer_NoPorts(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.MaxServers = 5
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
-	_, err := o.CreateServer("minecraft", 10)
+	_, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("unexpected error creating server 1: %v", err)
 	}
-	_, err = o.CreateServer("minecraft", 10)
+	_, err = o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("unexpected error creating server 2: %v", err)
 	}
 
 	// No ports available
-	s3, err := o.CreateServer("minecraft", 10)
+	s3, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if !errors.Is(err, ErrNoPortsAvailable) {
 		t.Fatalf("expected ErrNoPortsAvailable, got %v", err)
 	}
@@ -92,9 +98,9 @@ func TestCreateServer_NoPorts(t *testing.T) {
 
 func TestGetAndListServers(t *testing.T) {
 	cfg := mockConfig()
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
-	s1, _ := o.CreateServer("minecraft", 10)
+	s1, _ := o.CreateServer(context.Background(), "minecraft", 10)
 	
 	s, found := o.GetServer(s1.ID)
 	if !found {
@@ -125,21 +131,21 @@ func TestCreateServer_RaceCondition(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.MaxServers = 1
 	cfg.Ports.RangeEnd = 25570 // Enough ports
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
 	const numGoroutines = 50
 	var wg sync.WaitGroup
 	wg.Add(numGoroutines)
 
-	errors := make(chan error, numGoroutines)
+	errs := make(chan error, numGoroutines)
 	servers := make(chan *Server, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			defer wg.Done()
-			s, err := o.CreateServer("minecraft", 10)
+			s, err := o.CreateServer(context.Background(), "minecraft", 10)
 			if err != nil {
-				errors <- err
+				errs <- err
 				return
 			}
 			servers <- s
@@ -147,7 +153,7 @@ func TestCreateServer_RaceCondition(t *testing.T) {
 	}
 
 	wg.Wait()
-	close(errors)
+	close(errs)
 	close(servers)
 
 	createdCount := len(servers)
@@ -160,13 +166,13 @@ func TestCreateServer_Backpressure(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.MaxServers = 10
 	cfg.Orchestrator.Workers = 0 // No workers to drain the queue
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 	
 	// Set a small job queue for testing
 	o.jobQueue = make(chan *Server, 1)
 
 	// Fill the queue
-	_, err := o.CreateServer("minecraft", 10)
+	_, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("Failed to create first server: %v", err)
 	}
@@ -174,7 +180,7 @@ func TestCreateServer_Backpressure(t *testing.T) {
 	// Try to create another one, should return error instead of blocking
 	errChan := make(chan error, 1)
 	go func() {
-		_, err := o.CreateServer("minecraft", 10)
+		_, err := o.CreateServer(context.Background(), "minecraft", 10)
 		errChan <- err
 	}()
 
@@ -194,11 +200,11 @@ func TestMultipleWorkers(t *testing.T) {
 	cfg.Orchestrator.Workers = 2
 	cfg.Orchestrator.MaxServers = 5
 	cfg.Ports.RangeEnd = 25570
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 	o.StartWorkers()
 
-	s1, _ := o.CreateServer("game1", 10)
-	s2, _ := o.CreateServer("game2", 10)
+	s1, _ := o.CreateServer(context.Background(), "game1", 10)
+	s2, _ := o.CreateServer(context.Background(), "game2", 10)
 
 	// Wait for workers to process.
 	time.Sleep(250 * time.Millisecond)
@@ -214,10 +220,10 @@ func TestMultipleWorkers(t *testing.T) {
 func TestStopRunningServer(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.Workers = 1
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 	o.StartWorkers()
 
-	s, err := o.CreateServer("minecraft", 10)
+	s, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -229,7 +235,7 @@ func TestStopRunningServer(t *testing.T) {
 		t.Fatalf("expected state running, got %s", s.State())
 	}
 
-	err = o.StopServer(s.ID)
+	err = o.StopServer(context.Background(), s.ID)
 	if err != nil {
 		t.Fatalf("expected StopServer to succeed for running server, got error: %v", err)
 	}
@@ -242,10 +248,10 @@ func TestStopRunningServer(t *testing.T) {
 func TestStopStartingServer(t *testing.T) {
 	cfg := mockConfig()
 	cfg.Orchestrator.Workers = 1
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 	// Don't start workers yet, so we can control the transition
 
-	s, err := o.CreateServer("minecraft", 10)
+	s, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -260,7 +266,7 @@ func TestStopStartingServer(t *testing.T) {
 		t.Fatalf("expected state starting, got %s", s.State())
 	}
 
-	err = o.StopServer(s.ID)
+	err = o.StopServer(context.Background(), s.ID)
 	if err != nil {
 		t.Fatalf("expected StopServer to succeed for starting server, got error: %v", err)
 	}
@@ -272,9 +278,9 @@ func TestStopStartingServer(t *testing.T) {
 
 func TestStopServer_Inconsistency(t *testing.T) {
 	cfg := mockConfig()
-	o := NewOrchestrator(cfg)
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
-	s, err := o.CreateServer("minecraft", 10)
+	s, err := o.CreateServer(context.Background(), "minecraft", 10)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -289,7 +295,7 @@ func TestStopServer_Inconsistency(t *testing.T) {
 	
 	// Now it's stopped, but still in o.servers (because we didn't use StopServer yet).
 	// Calling StopServer should fail because Stopped -> Stopped via EventStop is invalid.
-	err = o.StopServer(s.ID)
+	err = o.StopServer(context.Background(), s.ID)
 	if err == nil {
 		t.Fatal("expected StopServer to fail for already stopped server")
 	}

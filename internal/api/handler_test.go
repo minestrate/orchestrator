@@ -9,9 +9,19 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/moby/moby/api/types/network"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/internal/server"
 )
+
+type mockDockerClient struct{}
+
+func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateRequest) (network.CreateResponse, error) {
+	return network.CreateResponse{ID: name}, nil
+}
+func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
+	return nil
+}
 
 func setupTestHandler() *Handler {
 	cfg := &config.Config{}
@@ -19,8 +29,10 @@ func setupTestHandler() *Handler {
 	cfg.Orchestrator.Workers = 1
 	cfg.Ports.RangeStart = 19132
 	cfg.Ports.RangeEnd = 19142
+	cfg.Network.Mode = "simple"
+	cfg.Network.DefaultNetwork = "test-net"
 
-	o := server.NewOrchestrator(cfg)
+	o, _ := server.NewOrchestrator(cfg, &mockDockerClient{})
 	return NewHandler(o)
 }
 
@@ -83,7 +95,7 @@ func TestListServers(t *testing.T) {
 	h := setupTestHandler()
 	
 	// Create one
-	_, _ = h.orchestrator.CreateServer("skywars", 8)
+	_, _ = h.orchestrator.CreateServer(context.Background(), "skywars", 8)
 
 	req := httptest.NewRequest(http.MethodGet, "/servers", nil)
 	w := httptest.NewRecorder()
@@ -112,7 +124,7 @@ func TestDeleteServer(t *testing.T) {
 	h := setupTestHandler()
 
 	t.Run("Success", func(t *testing.T) {
-		s, _ := h.orchestrator.CreateServer("skywars", 8)
+		s, _ := h.orchestrator.CreateServer(context.Background(), "skywars", 8)
 
 		req := httptest.NewRequest(http.MethodDelete, "/servers/"+s.ID, nil)
 		

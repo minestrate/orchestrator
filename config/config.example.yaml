@@ -25,4 +25,7 @@ ports:
   range_end: 20132
 
 network:
-  subnet_block: 172.20.0.0/14
+  mode: "isolated" # "simple" ou "isolated"
+  subnet_block: "172.20.0.0/14"
+  default_network: "minestrate-global"
+  enable_fallback: true

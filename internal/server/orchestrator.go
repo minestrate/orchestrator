@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -10,25 +11,47 @@ import (
 )
 
 type Orchestrator struct {
-	cfg           *config.Config
-	servers       map[string]*Server
-	serversMutex  sync.RWMutex
-	ports         *PortAllocator
-	jobQueue      chan *Server
+	cfg          *config.Config
+	servers      map[string]*Server
+	serversMutex sync.RWMutex
+	ports        *PortAllocator
+	networks     NetworkManager
+	jobQueue     chan *Server
 }
 
-func NewOrchestrator(cfg *config.Config) *Orchestrator {
+func NewOrchestrator(cfg *config.Config, docker DockerClient) (*Orchestrator, error) {
+	var nm NetworkManager
+	var err error
+
+	switch cfg.Network.Mode {
+	case "simple":
+		nm = NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
+	case "isolated":
+		nm, err = NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, ErrInvalidNetworkMode
+	}
+
+	if cfg.Network.EnableFallback && cfg.Network.Mode == "isolated" {
+		secondary := NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
+		nm = NewFallbackNetworkManager(nm, secondary)
+	}
+
 	o := &Orchestrator{
 		cfg:      cfg,
 		servers:  make(map[string]*Server),
 		ports:    NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
+		networks: nm,
 		jobQueue: make(chan *Server, 100),
 	}
 
-	return o
+	return o, nil
 }
 
-func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
+func (o *Orchestrator) CreateServer(ctx context.Context, game string, players int) (*Server, error) {
 	o.serversMutex.Lock()
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
 		o.serversMutex.Unlock()
@@ -42,7 +65,16 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 	}
 
 	id := uuid.New().String()
+
+	netCfg, err := o.networks.Allocate(ctx, id)
+	if err != nil {
+		o.ports.Release(port)
+		o.serversMutex.Unlock()
+		return nil, err
+	}
+
 	s := NewServer(id, game, players, "127.0.0.1", port)
+	s.Network = netCfg
 
 	o.servers[id] = s
 	o.serversMutex.Unlock()
@@ -56,11 +88,12 @@ func (o *Orchestrator) CreateServer(game string, players int) (*Server, error) {
 		delete(o.servers, id)
 		o.serversMutex.Unlock()
 		o.ports.Release(port)
+		_ = o.networks.Release(ctx, id)
 		return nil, ErrJobQueueFull
 	}
 }
 
-func (o *Orchestrator) StopServer(id string) error {
+func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 	o.serversMutex.Lock()
 	defer o.serversMutex.Unlock()
 
@@ -75,7 +108,7 @@ func (o *Orchestrator) StopServer(id string) error {
 
 	delete(o.servers, id)
 	o.ports.Release(s.Port)
-	return nil
+	return o.networks.Release(ctx, id)
 }
 
 func (o *Orchestrator) GetServer(id string) (*Server, bool) {
