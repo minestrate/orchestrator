@@ -108,7 +108,7 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 
 	s, ok := o.servers[id]
 	if !ok {
-		return fmt.Errorf("server %s not found", id)
+		return ErrServerNotFound
 	}
 
 	if err := s.Transition(EventStop); err != nil {
@@ -118,6 +118,60 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 	delete(o.servers, id)
 	o.ports.Release(s.Port)
 	return o.networks.Release(ctx, id)
+}
+
+func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
+	o.serversMutex.RLock()
+	s, ok := o.servers[id]
+	o.serversMutex.RUnlock()
+
+	if !ok {
+		return ErrServerNotFound
+	}
+
+	if s.State() != StateRunning {
+		return ErrServerNotRunning
+	}
+
+	if err := s.Transition(EventDrain); err != nil {
+		return err
+	}
+
+	go func() {
+		// Use background context for cleanup to ensure it completes even if request ctx is canceled
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		_ = o.docker.ContainerStop(cleanupCtx, s.ID, container.StopOptions{})
+		
+		o.ports.Release(s.Port)
+		_ = o.networks.Release(cleanupCtx, s.ID)
+		
+		_ = s.Transition(EventStop)
+	}()
+
+	return nil
+}
+
+func (o *Orchestrator) GC() {
+	o.serversMutex.Lock()
+	defer o.serversMutex.Unlock()
+
+	for id, s := range o.servers {
+		if s.State() == StateStopped {
+			delete(o.servers, id)
+		}
+	}
+}
+
+func (o *Orchestrator) StartGC(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			o.GC()
+		}
+	}()
 }
 
 func (o *Orchestrator) GetServer(id string) (*Server, bool) {

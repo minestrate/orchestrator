@@ -281,33 +281,67 @@ func TestStopStartingServer(t *testing.T) {
 	}
 }
 
-func TestStopServer_Inconsistency(t *testing.T) {
+func TestShutdownServer(t *testing.T) {
 	cfg := mockConfig()
 	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
 
-	s, err := o.CreateServer(context.Background(), "minecraft", 10)
-	if err != nil {
-		t.Fatalf("failed to create server: %v", err)
-	}
+	t.Run("Success", func(t *testing.T) {
+		s, _ := o.CreateServer(context.Background(), "minecraft", 10)
+		_ = s.Transition(EventStart)
+		_ = s.Transition(EventRun)
 
-	// Manually transition to Stopped state.
-	// We use a trick: transition to Stopped makes future EventStop fail.
-	// But we need to keep it in the orchestrator.
-	err = s.Transition(EventStop) 
-	if err != nil {
-		t.Fatalf("failed to transition to stopped: %v", err)
-	}
-	
-	// Now it's stopped, but still in o.servers (because we didn't use StopServer yet).
-	// Calling StopServer should fail because Stopped -> Stopped via EventStop is invalid.
-	err = o.StopServer(context.Background(), s.ID)
-	if err == nil {
-		t.Fatal("expected StopServer to fail for already stopped server")
-	}
+		err := o.ShutdownServer(context.Background(), s.ID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
-	// Verify inconsistency: Is it still in the orchestrator?
-	_, found := o.GetServer(s.ID)
-	if !found {
-		t.Error("BUG: server was removed from orchestrator even though StopServer failed")
+		if s.State() != StateDraining {
+			t.Errorf("expected state draining, got %s", s.State())
+		}
+
+		// Wait for background goroutine
+		time.Sleep(100 * time.Millisecond)
+
+		if s.State() != StateStopped {
+			t.Errorf("expected state stopped, got %s", s.State())
+		}
+	})
+
+	t.Run("NotRunning", func(t *testing.T) {
+		s, _ := o.CreateServer(context.Background(), "minecraft", 10)
+		// State is Pending
+
+		err := o.ShutdownServer(context.Background(), s.ID)
+		if !errors.Is(err, ErrServerNotRunning) {
+			t.Errorf("expected ErrServerNotRunning, got %v", err)
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		err := o.ShutdownServer(context.Background(), "non-existent")
+		if !errors.Is(err, ErrServerNotFound) {
+			t.Errorf("expected ErrServerNotFound, got %v", err)
+		}
+	})
+}
+
+func TestGC(t *testing.T) {
+	cfg := mockConfig()
+	o, _ := NewOrchestrator(cfg, &mockDockerClient{})
+
+	s1, _ := o.CreateServer(context.Background(), "game1", 10)
+	s2, _ := o.CreateServer(context.Background(), "game2", 10)
+
+	// s1 becomes stopped
+	_ = s1.Transition(EventStop)
+
+	o.GC()
+
+	if _, found := o.GetServer(s1.ID); found {
+		t.Error("expected s1 to be removed by GC")
+	}
+	if _, found := o.GetServer(s2.ID); !found {
+		t.Error("expected s2 to remain")
 	}
 }
+

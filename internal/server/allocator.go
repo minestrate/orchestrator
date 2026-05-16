@@ -13,12 +13,12 @@ import (
 	)
 
 	type DockerClient interface {
-	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
-	NetworkRemove(ctx context.Context, networkID string) error
-	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+		NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
+		NetworkRemove(ctx context.Context, networkID string) error
+		ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+		ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+		ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
 	}
-
 type NetworkConfig struct {
 	NetworkName string `json:"network_name"`
 	Subnet      string `json:"subnet"`

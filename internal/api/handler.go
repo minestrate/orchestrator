@@ -74,9 +74,13 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.orchestrator.StopServer(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+	if err := h.orchestrator.ShutdownServer(r.Context(), id); err != nil {
+		if errors.Is(err, server.ErrServerNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, server.ErrServerNotRunning) {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)

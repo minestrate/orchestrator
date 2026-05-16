@@ -30,6 +30,9 @@ func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *containe
 func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
 	return nil
 }
+func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
+	return nil
+}
 
 func setupTestHandler() *Handler {
 	cfg := &config.Config{}
@@ -40,7 +43,10 @@ func setupTestHandler() *Handler {
 	cfg.Network.Mode = "simple"
 	cfg.Network.DefaultNetwork = "test-net"
 
-	o, _ := server.NewOrchestrator(cfg, &mockDockerClient{})
+	o, err := server.NewOrchestrator(cfg, &mockDockerClient{})
+	if err != nil {
+		panic(err)
+	}
 	return NewHandler(o)
 }
 
@@ -129,10 +135,12 @@ func TestListServers(t *testing.T) {
 }
 
 func TestDeleteServer(t *testing.T) {
-	h := setupTestHandler()
-
 	t.Run("Success", func(t *testing.T) {
+		h := setupTestHandler()
 		s, _ := h.orchestrator.CreateServer(context.Background(), "skywars", 8)
+		// Manually transition to running
+		_ = s.Transition(server.EventStart)
+		_ = s.Transition(server.EventRun)
 
 		req := httptest.NewRequest(http.MethodDelete, "/servers/"+s.ID, nil)
 		
@@ -149,14 +157,32 @@ func TestDeleteServer(t *testing.T) {
 			t.Errorf("expected status 202, got %d", w.Code)
 		}
 
-		// Verify it's gone
-		_, found := h.orchestrator.GetServer(s.ID)
-		if found {
-			t.Error("expected server to be deleted")
+		if s.State() != server.StateDraining {
+			t.Errorf("expected state draining, got %s", s.State())
+		}
+	})
+
+	t.Run("Conflict_NotRunning", func(t *testing.T) {
+		h := setupTestHandler()
+		s, _ := h.orchestrator.CreateServer(context.Background(), "skywars", 8)
+		// State is Pending
+
+		req := httptest.NewRequest(http.MethodDelete, "/servers/"+s.ID, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", s.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		
+		w := httptest.NewRecorder()
+
+		h.DeleteServer(w, req)
+
+		if w.Code != http.StatusConflict {
+			t.Errorf("expected status 409, got %d", w.Code)
 		}
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
+		h := setupTestHandler()
 		req := httptest.NewRequest(http.MethodDelete, "/servers/nonexistent", nil)
 		
 		rctx := chi.NewRouteContext()

@@ -36,6 +36,9 @@ func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *containe
 func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
 	return nil
 }
+func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
+	return nil
+}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
@@ -99,6 +102,7 @@ func main() {
 		log.Fatalf("failed to create orchestrator: %v", err)
 	}
 	orchestrator.StartWorkers()
+	orchestrator.StartGC(1 * time.Minute)
 	h := api.NewHandler(orchestrator)
 
 	// ToDo : Public routes

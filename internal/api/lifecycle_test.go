@@ -33,6 +33,9 @@ func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *containe
 func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
 	return nil
 }
+func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
+	return nil
+}
 
 func TestServerLifecycle_Integration(t *testing.T) {
 	// Note: The address returned is the host IP, not the container IP.

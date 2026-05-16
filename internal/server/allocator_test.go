@@ -45,6 +45,10 @@ func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID strin
 	return nil
 }
 
+func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
+	return nil
+}
+
 func TestNetworkAllocator_Disjoint(t *testing.T) {
 	mock := &mockDockerClient{networks: make(map[string]string)}
 	// Smaller block for testing: /24 partitioned into /28s (16 subnets)
