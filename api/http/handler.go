@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"encoding/json"
@@ -9,16 +9,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/mitsuakki/minestrate/internal/auth"
-	"github.com/mitsuakki/minestrate/internal/server"
+	"github.com/mitsuakki/minestrate/api/service"
+	"github.com/mitsuakki/minestrate/domain"
+	"github.com/mitsuakki/minestrate/network"
+	"github.com/mitsuakki/minestrate/orchestrator"
 )
 
 type Handler struct {
-	orchestrator   *server.Orchestrator
-	refreshManager *auth.RefreshManager
+	orchestrator   *orchestrator.Orchestrator
+	refreshManager *service.RefreshManager
 }
 
-func NewHandler(o *server.Orchestrator, rm *auth.RefreshManager) *Handler {
+func NewHandler(o *orchestrator.Orchestrator, rm *service.RefreshManager) *Handler {
 	return &Handler{orchestrator: o, refreshManager: rm}
 }
 
@@ -37,7 +39,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := &auth.Claims{
+	claims := &service.Claims{
 		Scope: []string{"server:create"},
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   subject,
@@ -80,9 +82,9 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players)
 	if err != nil {
-		if errors.Is(err, server.ErrMaxServersReached) ||
-			errors.Is(err, server.ErrNoPortsAvailable) ||
-			errors.Is(err, server.ErrJobQueueFull) {
+		if errors.Is(err, domain.ErrMaxServersReached) ||
+			errors.Is(err, network.ErrNoPortsAvailable) ||
+			errors.Is(err, domain.ErrJobQueueFull) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
@@ -118,11 +120,11 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.orchestrator.ShutdownServer(r.Context(), id); err != nil {
-		if errors.Is(err, server.ErrServerNotFound) {
+		if errors.Is(err, domain.ErrServerNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, server.ErrServerNotRunning) {
+		if errors.Is(err, domain.ErrServerNotRunning) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -132,4 +134,3 @@ func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 }
-

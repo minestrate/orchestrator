@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -11,11 +11,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/docker/docker/client"
-	"github.com/mitsuakki/minestrate/internal/config"
-	"github.com/mitsuakki/minestrate/internal/api"
-	"github.com/mitsuakki/minestrate/internal/auth"
-	"github.com/mitsuakki/minestrate/internal/middleware"
-	"github.com/mitsuakki/minestrate/internal/server"
+	apihttp "github.com/mitsuakki/minestrate/api/http"
+	"github.com/mitsuakki/minestrate/api/middleware"
+	"github.com/mitsuakki/minestrate/api/service"
+	"github.com/mitsuakki/minestrate/config"
+	"github.com/mitsuakki/minestrate/logger"
+	"github.com/mitsuakki/minestrate/network"
+	"github.com/mitsuakki/minestrate/orchestrator"
 )
 
 func main() {
@@ -35,11 +37,13 @@ func main() {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
 	}
+	logger.Init(cfg.Env)
 
 	if cfg.Env == "dev" {
-		claims := &auth.Claims{
+		claims := &service.Claims{
 			Scope: []string{"server:create"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
@@ -53,7 +57,7 @@ func main() {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 		ss, err := token.SignedString([]byte(cfg.Auth.JWTSecret))
 		if err != nil {
-			log.Printf("failed to generate dev token: %v", err)
+			slog.Error("failed to generate dev token", "error", err)
 		} else {
 			fmt.Printf("Dev JWT: %s\n", ss)
 		}
@@ -61,12 +65,9 @@ func main() {
 
 	r := chi.NewRouter()
 
-	fmt.Printf("Docker socket: %q\n", cfg.Docker.Socket)
-	fmt.Printf("Env: %q\n", cfg.Env)
-
-	var dockerClient server.DockerClient
+	var dockerClient network.DockerClient
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
-		dockerClient = &server.MockDockerClient{}
+		dockerClient = &network.MockDockerClient{}
 	} else {
 		opts := []client.Opt{client.WithAPIVersionNegotiation()}
 		if cfg.Docker.Socket != "" {
@@ -76,19 +77,21 @@ func main() {
 		var err error
 		dockerClient, err = client.NewClientWithOpts(opts...)
 		if err != nil {
-			log.Fatalf("failed to create docker client: %v", err)
+			slog.Error("failed to create docker client", "error", err)
+			os.Exit(1)
 		}
 	}
 
-	orchestrator, err := server.NewOrchestrator(cfg, dockerClient)
+	o, err := orchestrator.NewOrchestrator(cfg, dockerClient)
 	if err != nil {
-		log.Fatalf("failed to create orchestrator: %v", err)
+		slog.Error("failed to create orchestrator", "error", err)
+		os.Exit(1)
 	}
-	orchestrator.StartWorkers()
-	orchestrator.StartGC(1 * time.Minute)
+	o.StartWorkers()
+	o.StartGC(1 * time.Minute)
 	
-	refreshManager := auth.NewRefreshManager(cfg.Auth.JWTSecret)
-	h := api.NewHandler(orchestrator, refreshManager)
+	refreshManager := service.NewRefreshManager(cfg.Auth.JWTSecret)
+	h := apihttp.NewHandler(o, refreshManager)
 
 	// ToDo : Public routes
 
@@ -106,11 +109,17 @@ func main() {
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	fmt.Printf("Starting server on %s\n", addr)
+	slog.Info("Starting server", "addr", addr)
 
 	if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
-		log.Fatal(http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r))
+		if err := http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r); err != nil {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
 	}
 
-	log.Fatal(http.ListenAndServe(addr, r))
+	if err := http.ListenAndServe(addr, r); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
 }
