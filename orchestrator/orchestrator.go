@@ -221,7 +221,7 @@ func (o *Orchestrator) StartWorkers() {
 	}
 }
 
-func (o *Orchestrator) worker(id int) {
+func (o *Orchestrator) worker(_ int) {
 	for s := range o.jobQueue {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(o.cfg.Orchestrator.StartTimeout)*time.Second)
 
@@ -246,6 +246,29 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	if err := s.Transition(domain.EventStart); err != nil {
 		return err
 	}
+
+	// Startup timeout goroutine
+	done := make(chan struct{})
+	go func() {
+		timeout := time.Duration(o.cfg.Orchestrator.StartTimeout) * time.Second
+		select {
+		case <-done:
+			return
+		case <-time.After(timeout):
+			if s.State() != domain.StateRunning {
+				_ = s.Transition(domain.EventTimeout)
+				containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+				_ = o.docker.ContainerRemove(context.Background(), containerName, container.RemoveOptions{Force: true})
+
+				o.serversMutex.Lock()
+				delete(o.servers, s.ID)
+				o.ports.Release(s.Port)
+				_ = o.networks.Release(context.Background(), s.ID)
+				o.serversMutex.Unlock()
+			}
+		}
+	}()
+	defer close(done)
 
 	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
