@@ -11,7 +11,7 @@ import (
 )
 
 func TestAuth(t *testing.T) {
-	secret := "test-secret"
+	secret := "this-is-a-very-long-secret-key-32-bytes"
 
 	tests := []struct {
 		name           string
@@ -108,7 +108,7 @@ func TestAuth(t *testing.T) {
 }
 
 func TestRequireScope(t *testing.T) {
-	secret := "test-secret"
+	secret := "this-is-a-very-long-secret-key-32-bytes"
 
 	tests := []struct {
 		name           string
