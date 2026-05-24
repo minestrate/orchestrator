@@ -16,6 +16,7 @@ import (
 
 type Orchestrator struct {
 	cfg          *config.Config
+	startTime    time.Time
 	servers      map[string]*domain.Server
 	serversMutex sync.RWMutex
 	ports        *network.PortAllocator
@@ -57,12 +58,13 @@ func NewOrchestrator(cfg *config.Config, docker network.DockerClient) (*Orchestr
 	}
 
 	o := &Orchestrator{
-		cfg:      cfg,
-		servers:  make(map[string]*domain.Server),
-		ports:    network.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
-		networks: nm,
-		docker:   docker,
-		jobQueue: make(chan *domain.Server, cfg.Orchestrator.Workers),
+		cfg:       cfg,
+		startTime: time.Now(),
+		servers:   make(map[string]*domain.Server),
+		ports:     network.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
+		networks:  nm,
+		docker:    docker,
+		jobQueue:  make(chan *domain.Server, cfg.Orchestrator.Workers),
 	}
 
 	return o, nil
@@ -213,6 +215,22 @@ func (o *Orchestrator) ListServers() []*domain.Server {
 		}
 	}
 	return list
+}
+
+func (o *Orchestrator) Metrics() (uptime float64, activeServers int, freePorts int, jobQueueFull bool) {
+	o.serversMutex.RLock()
+	defer o.serversMutex.RUnlock()
+
+	uptime = time.Since(o.startTime).Seconds()
+	activeServers = 0
+	for _, s := range o.servers {
+		if s.State() != domain.StateStopped {
+			activeServers++
+		}
+	}
+	freePorts = o.ports.FreePorts()
+	jobQueueFull = len(o.jobQueue) == cap(o.jobQueue)
+	return
 }
 
 func (o *Orchestrator) StartWorkers() {
