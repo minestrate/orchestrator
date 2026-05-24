@@ -14,11 +14,11 @@ cd minestrate
 go build -o minestrate ./cmd/minestrate
 
 # 2. Configure
-cp config/config.example.yaml config.yaml
-# edit config.yaml
+cp config/config.example.yaml minestrate.yaml
+# edit minestrate.yaml
 
 # 3. Run
-./minestrate --config config.yaml
+./minestrate --config minestrate.yaml
 ```
 
 ## Why
@@ -143,7 +143,7 @@ The `start_timeout` value should be set to $\mu_T + 10\sigma_T$ where $\mu_T$ is
 ## Configuration
 
 ```yaml
-# config.yaml
+# minestrate.yaml
 env: prod
 
 server:

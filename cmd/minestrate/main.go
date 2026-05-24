@@ -21,13 +21,16 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", "minestrate.yaml", "path to config file")
 	version := flag.Bool("version", false, "print version")
 	flag.Parse()
 
-	if len(os.Args) < 2 {
-		fmt.Println("Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.")
-		return
+	if len(os.Args) < 2 && *configPath == "minestrate.yaml" {
+		if _, err := os.Stat(*configPath); os.IsNotExist(err) {
+			fmt.Println("Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.")
+			fmt.Printf("Default config 'minestrate.yaml' not found. Use --config to specify a path.\n")
+			return
+		}
 	}
 
 	if *version {
@@ -37,7 +40,7 @@ func main() {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "CONFIGURATION ERROR: %v\n", err)
 		os.Exit(1)
 	}
 	logger.Init(cfg.Env)

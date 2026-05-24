@@ -6,7 +6,7 @@ server:
   tls_key: ""
 
 auth:
-  jwt_secret: "your-secret"
+  jwt_secret: "CHANGEME_MUST_BE_32_BYTES_LONG_OR_MORE" # min 32 bytes
   token_ttl: 300
 
 docker:

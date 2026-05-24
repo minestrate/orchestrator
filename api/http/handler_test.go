@@ -26,7 +26,7 @@ func setupTestHandler() *Handler {
 	cfg.Network.DefaultNetwork = "test-net"
 
 	o, _ := orchestrator.NewOrchestrator(cfg, &orchestrator.MockDockerClient{})
-	rm := service.NewRefreshManager("test-secret")
+	rm := service.NewRefreshManager("this-is-a-very-long-secret-key-32-bytes")
 	return NewHandler(o, rm)
 }
 
