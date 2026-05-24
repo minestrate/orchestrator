@@ -32,7 +32,7 @@ func TestRefreshManager(t *testing.T) {
 		return []byte(secret), nil
 	})
 	tokenID := claims.ID
-	
+
 	rm.RevokeToken(tokenID)
 	_, err = rm.ValidateToken(tokenString)
 	assert.Error(t, err)

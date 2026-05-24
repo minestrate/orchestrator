@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-var allStates = []ServerState {
+var allStates = []ServerState{
 	StatePending, StateStarting, StateRunning, StateDraining, StateStopped,
 }
 

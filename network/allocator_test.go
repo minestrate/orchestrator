@@ -186,7 +186,6 @@ func TestNetworkAllocator_Release(t *testing.T) {
 	}
 }
 
-
 func TestPortAllocator_Concurrency(t *testing.T) {
 	start, end := 20000, 30000
 	alloc := NewPortAllocator(start, end)

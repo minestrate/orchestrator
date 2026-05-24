@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/domain"
 	"github.com/mitsuakki/minestrate/network"
-	"github.com/docker/go-connections/nat"
 )
 
 type Orchestrator struct {
@@ -40,7 +40,7 @@ func NewOrchestrator(cfg *config.Config, docker network.DockerClient) (*Orchestr
 				return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
 			}
 		}
-		
+
 		nm = network.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 	case "isolated":
 		nm, err = network.NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
@@ -161,10 +161,10 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 
 		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
-		
+
 		o.ports.Release(s.Port)
 		_ = o.networks.Release(cleanupCtx, s.ID)
-		
+
 		_ = s.Transition(domain.EventStop)
 	}()
 
@@ -218,7 +218,7 @@ func (o *Orchestrator) StartWorkers() {
 func (o *Orchestrator) worker(id int) {
 	for s := range o.jobQueue {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(o.cfg.Orchestrator.StartTimeout)*time.Second)
-		
+
 		err := o.processJob(ctx, s)
 		cancel()
 

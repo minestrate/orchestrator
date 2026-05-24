@@ -12,7 +12,7 @@ import (
 
 func TestAuth(t *testing.T) {
 	secret := "test-secret"
-	
+
 	tests := []struct {
 		name           string
 		tokenFunc      func() string

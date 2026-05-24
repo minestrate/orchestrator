@@ -31,7 +31,7 @@ func setupTestHandler() *Handler {
 
 func TestCreateServer(t *testing.T) {
 	h := setupTestHandler()
-	
+
 	t.Run("ValidRequest", func(t *testing.T) {
 		reqBody := CreateServerRequest{Game: "skywars", Players: 8}
 		body, _ := json.Marshal(reqBody)
@@ -45,7 +45,9 @@ func TestCreateServer(t *testing.T) {
 		}
 
 		var resp ServerResponse
-		json.NewDecoder(w.Body).Decode(&resp)
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
 		if resp.Game != "skywars" {
 			t.Errorf("Expected game skywars, got %s", resp.Game)
 		}
@@ -67,7 +69,7 @@ func TestCreateServer(t *testing.T) {
 
 func TestListServers(t *testing.T) {
 	h := setupTestHandler()
-	
+
 	// Create a server first
 	reqBody := CreateServerRequest{Game: "survival", Players: 20}
 	body, _ := json.Marshal(reqBody)
@@ -85,7 +87,9 @@ func TestListServers(t *testing.T) {
 	}
 
 	var resp []ServerResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
 	if len(resp) != 1 {
 		t.Errorf("Expected 1 server, got %d", len(resp))
 	}
@@ -93,15 +97,17 @@ func TestListServers(t *testing.T) {
 
 func TestGetServer(t *testing.T) {
 	h := setupTestHandler()
-	
+
 	// Create a server
 	reqBody := CreateServerRequest{Game: "bedwars", Players: 4}
 	body, _ := json.Marshal(reqBody)
 	w := httptest.NewRecorder()
 	h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
-	
+
 	var created ServerResponse
-	json.NewDecoder(w.Body).Decode(&created)
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("Found", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/servers/"+created.ID, nil)
@@ -109,7 +115,7 @@ func TestGetServer(t *testing.T) {
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", created.ID)
 		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-		
+
 		w = httptest.NewRecorder()
 		h.GetServer(w, req)
 
@@ -135,24 +141,30 @@ func TestGetServer(t *testing.T) {
 
 func TestDeleteServer(t *testing.T) {
 	h := setupTestHandler()
-	
+
 	// Create a server
 	reqBody := CreateServerRequest{Game: "test", Players: 10}
 	body, _ := json.Marshal(reqBody)
 	w := httptest.NewRecorder()
 	h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
-	
+
 	var created ServerResponse
-	json.NewDecoder(w.Body).Decode(&created)
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
 
 	// In MockDockerClient, it's not actually running unless we process jobs.
 	// But ShutdownServer only checks if state is Running.
 	// Since we use NewOrchestrator with MockDockerClient, it might not be Running immediately.
 	// We need to transition it to Running for ShutdownServer to work (or it returns ErrServerNotRunning).
-	
+
 	s, _ := h.orchestrator.GetServer(created.ID)
-	s.Transition(domain.EventStart)
-	s.Transition(domain.EventRun)
+	if err := s.Transition(domain.EventStart); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Transition(domain.EventRun); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("Success", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/servers/"+created.ID, nil)
@@ -173,7 +185,9 @@ func TestDeleteServer(t *testing.T) {
 		w = httptest.NewRecorder()
 		h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
 		var pending ServerResponse
-		json.NewDecoder(w.Body).Decode(&pending)
+		if err := json.NewDecoder(w.Body).Decode(&pending); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest(http.MethodDelete, "/servers/"+pending.ID, nil)
 		rctx := chi.NewRouteContext()

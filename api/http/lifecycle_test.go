@@ -48,7 +48,7 @@ func TestServerLifecycle_Integration(t *testing.T) {
 		Players: 20,
 	}
 	body, _ := json.Marshal(reqBody)
-	
+
 	resp, err := nethttp.Post(ts.URL+"/servers", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		t.Fatalf("Failed to POST /servers: %v", err)
@@ -77,13 +77,13 @@ func TestServerLifecycle_Integration(t *testing.T) {
 	id := createdServer.ID
 	maxAttempts := 20
 	success := false
-	
+
 	for i := 0; i < maxAttempts; i++ {
 		resp, err := nethttp.Get(fmt.Sprintf("%s/servers/%s", ts.URL, id))
 		if err != nil {
 			t.Fatalf("Failed to GET /servers/%s: %v", id, err)
 		}
-		
+
 		var polledServer struct {
 			State string `json:"state"`
 		}

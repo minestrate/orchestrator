@@ -108,7 +108,7 @@ func TestGetAndListServers(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, &network.MockDockerClient{})
 
 	s1, _ := o.CreateServer(context.Background(), "minecraft", 10)
-	
+
 	s, found := o.GetServer(s1.ID)
 	if !found {
 		t.Fatal("expected to find server")
@@ -174,7 +174,7 @@ func TestCreateServer_Backpressure(t *testing.T) {
 	cfg.Orchestrator.MaxServers = 10
 	cfg.Orchestrator.Workers = 0 // No workers to drain the queue
 	o, _ := NewOrchestrator(cfg, &network.MockDockerClient{})
-	
+
 	// Set a small job queue for testing
 	o.jobQueue = make(chan *domain.Server, 1)
 
@@ -346,4 +346,3 @@ func TestGC(t *testing.T) {
 		t.Error("expected s2 to remain")
 	}
 }
-

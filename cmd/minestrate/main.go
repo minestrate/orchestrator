@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/docker/docker/client"
 	apihttp "github.com/mitsuakki/minestrate/api/http"
 	"github.com/mitsuakki/minestrate/api/middleware"
 	"github.com/mitsuakki/minestrate/api/service"
@@ -89,7 +89,7 @@ func main() {
 	}
 	o.StartWorkers()
 	o.StartGC(1 * time.Minute)
-	
+
 	refreshManager := service.NewRefreshManager(cfg.Auth.JWTSecret)
 	h := apihttp.NewHandler(o, refreshManager)
 
