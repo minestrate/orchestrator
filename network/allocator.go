@@ -395,8 +395,16 @@ func (a *PortAllocator) FreePorts() int {
 		val := atomic.LoadUint64(&a.bits[i])
 		count += bits.OnesCount64(val)
 	}
-	total := a.rangeEnd - a.rangeStart + 1
-	return total - count
+
+	// Calculate the number of masked padding bits
+	paddingBits := 0
+	countRange := a.rangeEnd - a.rangeStart + 1
+	if countRange%64 != 0 {
+		paddingBits = 64 - (countRange % 64)
+	}
+
+	total := countRange
+	return total - (count - paddingBits)
 }
 
 func partitionSubnet(base *net.IPNet, newMask int) ([]*net.IPNet, error) {

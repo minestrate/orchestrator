@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/client"
@@ -112,17 +115,39 @@ func main() {
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	slog.Info("Starting server", "addr", addr)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
 
-	if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
-		if err := http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r); err != nil {
+	// Signal handling for graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		slog.Info("Starting server", "addr", addr)
+		var err error
+		if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
+			err = server.ListenAndServeTLS(cfg.Server.TLSCert, cfg.Server.TLSKey)
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			slog.Error("server failed", "error", err)
 			os.Exit(1)
 		}
+	}()
+
+	<-stop
+	slog.Info("Shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("HTTP server shutdown failed", "error", err)
 	}
 
-	if err := http.ListenAndServe(addr, r); err != nil {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
-	}
+	o.ShutdownAll(shutdownCtx)
+	slog.Info("Exit.")
 }
