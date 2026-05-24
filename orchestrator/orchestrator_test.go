@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/mitsuakki/minestrate/config"
 	"github.com/mitsuakki/minestrate/domain"
 	"github.com/mitsuakki/minestrate/network"
@@ -16,6 +17,7 @@ func mockConfig() *config.Config {
 	cfg := &config.Config{}
 	cfg.Orchestrator.MaxServers = 10
 	cfg.Orchestrator.Workers = 10
+	cfg.Orchestrator.StartTimeout = 30
 	cfg.Ports.RangeStart = 25565
 	cfg.Ports.RangeEnd = 25600
 	cfg.Network.Mode = "simple"
@@ -331,22 +333,59 @@ func TestShutdownServer(t *testing.T) {
 	})
 }
 
-func TestGC(t *testing.T) {
+func TestStartupTimeout(t *testing.T) {
 	cfg := mockConfig()
-	o, _ := NewOrchestrator(cfg, &network.MockDockerClient{})
+	cfg.Orchestrator.StartTimeout = 1 // 1 second timeout
+	cfg.Orchestrator.Workers = 1
 
-	s1, _ := o.CreateServer(context.Background(), "game1", 10)
-	s2, _ := o.CreateServer(context.Background(), "game2", 10)
-
-	// s1 becomes stopped
-	_ = s1.Transition(domain.EventStop)
-
-	o.GC()
-
-	if _, found := o.GetServer(s1.ID); found {
-		t.Error("expected s1 to be removed by GC")
+	// Custom mock that blocks ContainerStart until context is cancelled or manually unblocked
+	mock := &blockingDockerClient{
+		MockDockerClient: network.MockDockerClient{},
+		startCalled:      make(chan struct{}),
+		unblock:          make(chan struct{}),
 	}
-	if _, found := o.GetServer(s2.ID); !found {
-		t.Error("expected s2 to remain")
+
+	o, _ := NewOrchestrator(cfg, mock)
+	o.StartWorkers()
+
+	s, err := o.CreateServer(context.Background(), "minecraft", 10)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Wait for worker to call ContainerStart
+	<-mock.startCalled
+
+	// Wait for timeout (1s) + 200ms grace period
+	time.Sleep(1200 * time.Millisecond)
+
+	if s.State() != domain.StateStopped {
+		t.Errorf("expected state stopped after timeout, got %s", s.State())
+	}
+
+	o.serversMutex.RLock()
+	_, found := o.servers[s.ID]
+	o.serversMutex.RUnlock()
+	if found {
+		t.Error("expected server to be removed from orchestrator map")
+	}
+
+	// Release mock block
+	close(mock.unblock)
+}
+
+type blockingDockerClient struct {
+	network.MockDockerClient
+	startCalled chan struct{}
+	unblock     chan struct{}
+}
+
+func (m *blockingDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
+	close(m.startCalled)
+	select {
+	case <-m.unblock:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

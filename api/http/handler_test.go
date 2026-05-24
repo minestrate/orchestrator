@@ -19,6 +19,7 @@ func setupTestHandler() *Handler {
 	cfg := &config.Config{}
 	cfg.Orchestrator.MaxServers = 10
 	cfg.Orchestrator.Workers = 10
+	cfg.Orchestrator.StartTimeout = 30
 	cfg.Ports.RangeStart = 19132
 	cfg.Ports.RangeEnd = 19142
 	cfg.Network.Mode = "simple"
@@ -83,8 +84,12 @@ func TestListServers(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	h.CreateServer(w2, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body2)))
 	var created2 ServerResponse
-	json.NewDecoder(w2.Body).Decode(&created2)
-	h.orchestrator.StopServer(context.Background(), created2.ID)
+	if err := json.NewDecoder(w2.Body).Decode(&created2); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.orchestrator.StopServer(context.Background(), created2.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	// List servers
 	req = httptest.NewRequest(http.MethodGet, "/servers", nil)
