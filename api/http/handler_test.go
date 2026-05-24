@@ -157,6 +157,38 @@ func TestGetServer(t *testing.T) {
 	})
 }
 
+func TestHealthCheck(t *testing.T) {
+	h := setupTestHandler()
+
+	t.Run("StatusOK", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
+
+		h.HealthCheck(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp["status"] != "ok" {
+			t.Errorf("Expected status ok, got %v", resp["status"])
+		}
+		if _, ok := resp["uptime_seconds"]; !ok {
+			t.Error("Missing uptime_seconds")
+		}
+		if _, ok := resp["servers_active"]; !ok {
+			t.Error("Missing servers_active")
+		}
+		if _, ok := resp["port_pool_free"]; !ok {
+			t.Error("Missing port_pool_free")
+		}
+	})
+}
+
 func TestDeleteServer(t *testing.T) {
 	h := setupTestHandler()
 

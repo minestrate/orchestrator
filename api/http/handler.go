@@ -63,6 +63,24 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	uptime, active, free, full := h.orchestrator.Metrics()
+
+	status := http.StatusOK
+	if full {
+		status = http.StatusServiceUnavailable
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "ok",
+		"uptime_seconds": int64(uptime),
+		"servers_active": active,
+		"port_pool_free": free,
+	})
+}
+
 func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	var req CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

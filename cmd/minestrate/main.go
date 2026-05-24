@@ -96,7 +96,7 @@ func main() {
 	refreshManager := service.NewRefreshManager(cfg.Auth.JWTSecret)
 	h := apihttp.NewHandler(o, refreshManager)
 
-	// ToDo : Public routes
+	r.Get("/health", h.HealthCheck)
 
 	r.Group(func(r chi.Router) {
 		r.Post("/auth/refresh", h.RefreshToken)

@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -386,6 +387,16 @@ func (a *PortAllocator) Release(port int) {
 			return
 		}
 	}
+}
+
+func (a *PortAllocator) FreePorts() int {
+	count := 0
+	for i := 0; i < len(a.bits); i++ {
+		val := atomic.LoadUint64(&a.bits[i])
+		count += bits.OnesCount64(val)
+	}
+	total := a.rangeEnd - a.rangeStart + 1
+	return total - count
 }
 
 func partitionSubnet(base *net.IPNet, newMask int) ([]*net.IPNet, error) {
