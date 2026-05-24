@@ -374,6 +374,53 @@ func TestStartupTimeout(t *testing.T) {
 	close(mock.unblock)
 }
 
+func TestStartupTimeout_RaceCondition(t *testing.T) {
+	cfg := mockConfig()
+	cfg.Orchestrator.StartTimeout = 1 // 1 second timeout
+	cfg.Orchestrator.Workers = 1
+
+	// Custom mock that delays ContainerStart and unblocks right at the timeout
+	mock := &racingDockerClient{
+		MockDockerClient: network.MockDockerClient{},
+	}
+
+	o, _ := NewOrchestrator(cfg, mock)
+	o.StartWorkers()
+
+	s, err := o.CreateServer(context.Background(), "minecraft", 10)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Wait for worker to finish (or timeout to fire)
+	// We want to simulate successful start just as the timeout fires.
+	time.Sleep(1500 * time.Millisecond)
+
+	// In the current implementation, this test should fail if the container is removed
+	// even though the process was successful.
+
+	if s.State() != domain.StateRunning {
+		t.Errorf("expected state running, got %s", s.State())
+	}
+
+	o.serversMutex.RLock()
+	_, found := o.servers[s.ID]
+	o.serversMutex.RUnlock()
+	if !found {
+		t.Error("expected server to remain in orchestrator map")
+	}
+}
+
+type racingDockerClient struct {
+	network.MockDockerClient
+}
+
+func (m *racingDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
+	// Simulate some work, then sleep to align with timeout
+	time.Sleep(900 * time.Millisecond)
+	return nil
+}
+
 type blockingDockerClient struct {
 	network.MockDockerClient
 	startCalled chan struct{}

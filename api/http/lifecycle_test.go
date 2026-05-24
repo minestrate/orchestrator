@@ -22,6 +22,7 @@ func TestServerLifecycle_Integration(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Orchestrator.MaxServers = 10
 	cfg.Orchestrator.Workers = 2
+	cfg.Orchestrator.StartTimeout = 30
 	cfg.Ports.RangeStart = 20000
 	cfg.Ports.RangeEnd = 20100
 	cfg.Network.Mode = "simple"

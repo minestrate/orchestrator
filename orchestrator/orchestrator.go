@@ -198,6 +198,54 @@ func (o *Orchestrator) StartGC(interval time.Duration) {
 	}()
 }
 
+func (o *Orchestrator) ShutdownAll(ctx context.Context) {
+	o.serversMutex.RLock()
+	activeServers := make([]*domain.Server, 0)
+	for _, s := range o.servers {
+		if s.State() != domain.StateStopped {
+			activeServers = append(activeServers, s)
+		}
+	}
+	o.serversMutex.RUnlock()
+
+	var wg sync.WaitGroup
+	for _, s := range activeServers {
+		wg.Add(1)
+		go func(srv *domain.Server) {
+			defer wg.Done()
+
+			// We try to transition to Draining, but if it's already draining or stopping, we just proceed to stop container.
+			_ = srv.Transition(domain.EventDrain)
+
+			containerName := fmt.Sprintf("minestrate-%s-%s", srv.Game, srv.ID[:8])
+			fmt.Printf("Stopping container: %s\n", containerName)
+
+			// Use the provided context (which has the shutdown timeout)
+			_ = o.docker.ContainerStop(ctx, containerName, container.StopOptions{})
+			_ = o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
+
+			o.ports.Release(srv.Port)
+			_ = o.networks.Release(ctx, srv.ID)
+
+			_ = srv.Transition(domain.EventStop)
+		}(s)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		fmt.Println("All servers shut down gracefully.")
+	case <-ctx.Done():
+		fmt.Println("Shutdown timed out, some containers may still be running.")
+	}
+}
+
+
 func (o *Orchestrator) GetServer(id string) (*domain.Server, bool) {
 	o.serversMutex.RLock()
 	defer o.serversMutex.RUnlock()
@@ -249,12 +297,14 @@ func (o *Orchestrator) worker(_ int) {
 		if err != nil {
 			_ = s.Transition(domain.EventStop)
 			containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
-			_ = o.docker.ContainerRemove(context.Background(), containerName, container.RemoveOptions{Force: true})
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
 			o.serversMutex.Lock()
 			delete(o.servers, s.ID)
 			o.ports.Release(s.Port)
-			_ = o.networks.Release(context.Background(), s.ID)
+			_ = o.networks.Release(cleanupCtx, s.ID)
+			cancel()
 			o.serversMutex.Unlock()
 		}
 	}
@@ -266,27 +316,30 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	}
 
 	// Startup timeout goroutine
-	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	go func() {
 		timeout := time.Duration(o.cfg.Orchestrator.StartTimeout) * time.Second
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return
 		case <-time.After(timeout):
 			if s.State() != domain.StateRunning {
 				_ = s.Transition(domain.EventTimeout)
 				containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
-				_ = o.docker.ContainerRemove(context.Background(), containerName, container.RemoveOptions{Force: true})
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
 				o.serversMutex.Lock()
 				delete(o.servers, s.ID)
 				o.ports.Release(s.Port)
-				_ = o.networks.Release(context.Background(), s.ID)
+				_ = o.networks.Release(cleanupCtx, s.ID)
+				cancel()
 				o.serversMutex.Unlock()
 			}
 		}
 	}()
-	defer close(done)
 
 	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
@@ -314,5 +367,9 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 		return err
 	}
 
-	return s.Transition(domain.EventRun)
+	err = s.Transition(domain.EventRun)
+	if err == nil {
+		cancel()
+	}
+	return err
 }
