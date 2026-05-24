@@ -11,7 +11,8 @@ import (
 )
 
 func TestRateLimiter(t *testing.T) {
-	rl := NewRateLimiter(10, 5) // 10/s, 5 burst
+	rl := NewRateLimiter(context.Background(), 10, 5) // 10/s, 5 burst
+	defer rl.Stop()
 	
 	sub := "test-sub"
 	claims := &service.Claims{

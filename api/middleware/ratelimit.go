@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -19,30 +20,43 @@ type RateLimiter struct {
 	mu       sync.Mutex
 	rate     rate.Limit
 	burst    int
+	cancel   context.CancelFunc
 }
 
-func NewRateLimiter(r float64, b int) *RateLimiter {
+func NewRateLimiter(ctx context.Context, r float64, b int) *RateLimiter {
+	ctx, cancel := context.WithCancel(ctx)
 	rl := &RateLimiter{
 		limiters: make(map[string]*limiterBucket),
 		rate:     rate.Limit(r),
 		burst:    b,
+		cancel:   cancel,
 	}
 
-	go rl.cleanup()
+	go rl.cleanup(ctx)
 	return rl
 }
 
-func (rl *RateLimiter) cleanup() {
+func (rl *RateLimiter) Stop() {
+	rl.cancel()
+}
+
+func (rl *RateLimiter) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for sub, b := range rl.limiters {
-			if now.Sub(b.lastAccess) > 5*time.Minute {
-				delete(rl.limiters, sub)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for sub, b := range rl.limiters {
+				if now.Sub(b.lastAccess) > 5*time.Minute {
+					delete(rl.limiters, sub)
+				}
 			}
+			rl.mu.Unlock()
+		case <-ctx.Done():
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 
