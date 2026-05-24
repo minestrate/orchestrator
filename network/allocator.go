@@ -1,4 +1,4 @@
-package server
+package network
 
 import (
 	"context"
@@ -10,15 +10,18 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	)
+)
 
-	type DockerClient interface {
-		NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
-		NetworkRemove(ctx context.Context, networkID string) error
-		ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-		ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
-		ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
-	}
+type DockerClient interface {
+	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
+	NetworkRemove(ctx context.Context, networkID string) error
+	NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error)
+
+	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
+}
+
 type NetworkConfig struct {
 	NetworkName string `json:"network_name"`
 	Subnet      string `json:"subnet"`
@@ -43,6 +46,17 @@ func NewSimpleNetworkManager(networkName string) *SimpleNetworkManager {
 		networkName: networkName,
 		active:      make(map[string]*NetworkConfig),
 	}
+}
+
+func EnsureNetwork(ctx context.Context, docker DockerClient, name string) error {
+	_, err := docker.NetworkInspect(ctx, name, network.InspectOptions{})
+	if err == nil {
+		return nil
+	}
+	_, err = docker.NetworkCreate(ctx, name, network.CreateOptions{
+		Driver: "bridge",
+	})
+	return err
 }
 
 func (m *SimpleNetworkManager) Allocate(ctx context.Context, gameID string) (*NetworkConfig, error) {

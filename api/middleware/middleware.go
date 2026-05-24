@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/mitsuakki/minestrate/internal/auth"
+	"github.com/mitsuakki/minestrate/api/service"
 )
 
 type contextKey string
@@ -24,7 +24,7 @@ func Auth(secret string) func(http.Handler) http.Handler {
 			}
 
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-			claims := &auth.Claims{}
+			claims := &service.Claims{}
 
 			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -47,7 +47,7 @@ func Auth(secret string) func(http.Handler) http.Handler {
 func RequireScope(scope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := r.Context().Value(ClaimsKey).(*auth.Claims)
+			claims, ok := r.Context().Value(ClaimsKey).(*service.Claims)
 			if !ok {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return

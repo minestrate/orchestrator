@@ -1,11 +1,11 @@
-package server
+package domain
 
 import (
 	"errors"
 	"testing"
 )
 
-var allStates = []ServerState {
+var allStates = []ServerState{
 	StatePending, StateStarting, StateRunning, StateDraining, StateStopped,
 }
 

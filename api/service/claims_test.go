@@ -1,17 +1,16 @@
-package auth_test
+package service
 
 import (
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/mitsuakki/minestrate/internal/auth"
 )
 
 func TestClaims(t *testing.T) {
 	now := time.Now()
 
-	claims := auth.Claims{
+	claims := Claims{
 		Scope: []string{"read", "write"},
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "test-suite",

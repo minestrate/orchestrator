@@ -2,15 +2,15 @@ env: dev
 
 server:
   port: 8080
-  tls_cert: /etc/minestrate/cert.pem
-  tls_key: /etc/minestrate/key.pem
+  tls_cert: ""
+  tls_key: ""
 
 auth:
   jwt_secret: "your-secret"
   token_ttl: 300
 
 docker:
-  socket: /var/run/docker.sock
+  socket: "npipe:////./pipe/docker_engine"
   image: pmmp/pocketmine-mp:latest
   cpu_limit: 1.0
   memory_limit: 512m
@@ -25,7 +25,7 @@ ports:
   range_end: 20132
 
 network:
-  mode: "isolated" # "simple" ou "isolated"
+  mode: "simple" # "simple" ou "isolated"
   subnet_block: "172.20.0.0/14"
   default_network: "minestrate-global"
   enable_fallback: true

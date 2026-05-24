@@ -1,6 +1,6 @@
-package api
+package http
 
-import "github.com/mitsuakki/minestrate/internal/server"
+import "github.com/mitsuakki/minestrate/domain"
 
 type ServerResponse struct {
 	ID      string             `json:"id"`
@@ -8,10 +8,10 @@ type ServerResponse struct {
 	Players int                `json:"players"`
 	Address string             `json:"address"`
 	Port    int                `json:"port"`
-	State   server.ServerState `json:"state"`
+	State   domain.ServerState `json:"state"`
 }
 
-func ToServerResponse(s *server.Server) ServerResponse {
+func ToServerResponse(s *domain.Server) ServerResponse {
 	return ServerResponse{
 		ID:      s.ID,
 		Game:    s.Game,
@@ -22,7 +22,7 @@ func ToServerResponse(s *server.Server) ServerResponse {
 	}
 }
 
-func ToServerListResponse(servers []*server.Server) []ServerResponse {
+func ToServerListResponse(servers []*domain.Server) []ServerResponse {
 	resp := make([]ServerResponse, len(servers))
 	for i, s := range servers {
 		resp[i] = ToServerResponse(s)

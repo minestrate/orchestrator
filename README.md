@@ -14,11 +14,11 @@ cd minestrate
 go build -o minestrate ./cmd/minestrate
 
 # 2. Configure
-cp minestrate.example.yaml minestrate.yaml
-# edit minestrate.yaml
+cp config/config.example.yaml config.yaml
+# edit config.yaml
 
 # 3. Run
-./minestrate --config minestrate.yaml
+./minestrate --config config.yaml
 ```
 
 ## Why
@@ -143,20 +143,20 @@ The `start_timeout` value should be set to $\mu_T + 10\sigma_T$ where $\mu_T$ is
 ## Configuration
 
 ```yaml
-# minestrate.yaml
+# config.yaml
 env: prod
 
 server:
   port: 8080
-  tls_cert: /etc/minestrate/cert.pem
-  tls_key: /etc/minestrate/key.pem
+  tls_cert: "" # Optional: path to your cert.pem
+  tls_key: ""  # Optional: path to your key.pem
 
 auth:
   jwt_secret: "your-secret"
   token_ttl: 300
 
 docker:
-  socket: /var/run/docker.sock
+  socket: "" # Default platform socket (e.g. /var/run/docker.sock or npipe:////./pipe/docker_engine)
   image: pmmp/pocketmine-mp:latest
   cpu_limit: 1.0
   memory_limit: 512m

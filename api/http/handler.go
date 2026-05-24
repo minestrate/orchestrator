@@ -1,21 +1,66 @@
-package api
+package http
 
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/mitsuakki/minestrate/internal/server"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/mitsuakki/minestrate/api/service"
+	"github.com/mitsuakki/minestrate/domain"
+	"github.com/mitsuakki/minestrate/network"
+	"github.com/mitsuakki/minestrate/orchestrator"
 )
 
 type Handler struct {
-	orchestrator *server.Orchestrator
+	orchestrator   *orchestrator.Orchestrator
+	refreshManager *service.RefreshManager
 }
 
-func NewHandler(o *server.Orchestrator) *Handler {
-	return &Handler{orchestrator: o}
+func NewHandler(o *orchestrator.Orchestrator, rm *service.RefreshManager) *Handler {
+	return &Handler{orchestrator: o, refreshManager: rm}
+}
+
+func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	subject, err := h.refreshManager.ValidateToken(req.RefreshToken)
+	if err != nil {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	claims := &service.Claims{
+		Scope: []string{"server:create"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   subject,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(h.refreshManager.GetSecret()))
+	if err != nil {
+		http.Error(w, "failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"access_token": signed,
+	})
 }
 
 func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
@@ -37,9 +82,9 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players)
 	if err != nil {
-		if errors.Is(err, server.ErrMaxServersReached) ||
-			errors.Is(err, server.ErrNoPortsAvailable) ||
-			errors.Is(err, server.ErrJobQueueFull) {
+		if errors.Is(err, domain.ErrMaxServersReached) ||
+			errors.Is(err, network.ErrNoPortsAvailable) ||
+			errors.Is(err, domain.ErrJobQueueFull) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
@@ -75,11 +120,11 @@ func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.orchestrator.ShutdownServer(r.Context(), id); err != nil {
-		if errors.Is(err, server.ErrServerNotFound) {
+		if errors.Is(err, domain.ErrServerNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, server.ErrServerNotRunning) {
+		if errors.Is(err, domain.ErrServerNotRunning) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -89,4 +134,3 @@ func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 }
-

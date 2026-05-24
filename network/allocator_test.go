@@ -1,4 +1,4 @@
-package server
+package network
 
 import (
 	"context"
@@ -35,6 +35,10 @@ func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) 
 	}
 	delete(m.networks, networkID)
 	return nil
+}
+
+func (m *mockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
+	return network.Inspect{}, nil
 }
 
 func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
@@ -181,7 +185,6 @@ func TestNetworkAllocator_Release(t *testing.T) {
 		t.Errorf("Expected same subnet to be reused, got %s", cfg2.Subnet)
 	}
 }
-
 
 func TestPortAllocator_Concurrency(t *testing.T) {
 	start, end := 20000, 30000

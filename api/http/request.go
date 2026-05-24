@@ -1,4 +1,4 @@
-package api
+package http
 
 type CreateServerRequest struct {
 	Game    string `json:"game"`

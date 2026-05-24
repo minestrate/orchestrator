@@ -1,4 +1,4 @@
-package server
+package domain
 
 import (
 	"encoding/json"
@@ -56,12 +56,12 @@ var transitionTable = map[transitionKey]ServerState{
 
 type Server struct {
 	mu      sync.Mutex
-	ID      string         `json:"id"`
-	Game    string         `json:"game"`
-	Players int            `json:"players"`
-	Address string         `json:"address"`
-	Port    int            `json:"port"`
-	Network *NetworkConfig `json:"network"`
+	ID      string                 `json:"id"`
+	Game    string                 `json:"game"`
+	Players int                    `json:"players"`
+	Address string                 `json:"address"`
+	Port    int                    `json:"port"`
+	Network map[string]interface{} `json:"network"`
 	state   ServerState
 	hooks   []TransitionHook
 }
@@ -115,13 +115,13 @@ func (s *Server) MarshalJSON() ([]byte, error) {
 	defer s.mu.Unlock()
 
 	return json.Marshal(struct {
-		ID      string         `json:"id"`
-		Game    string         `json:"game"`
-		Players int            `json:"players"`
-		Address string         `json:"address"`
-		Port    int            `json:"port"`
-		Network *NetworkConfig `json:"network"`
-		State   ServerState    `json:"state"`
+		ID      string                 `json:"id"`
+		Game    string                 `json:"game"`
+		Players int                    `json:"players"`
+		Address string                 `json:"address"`
+		Port    int                    `json:"port"`
+		Network map[string]interface{} `json:"network"`
+		State   ServerState            `json:"state"`
 	}{
 		ID:      s.ID,
 		Game:    s.Game,

@@ -1,44 +1,24 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	apihttp "github.com/mitsuakki/minestrate/api/http"
+	"github.com/mitsuakki/minestrate/api/middleware"
+	"github.com/mitsuakki/minestrate/api/service"
 	"github.com/mitsuakki/minestrate/config"
-	"github.com/mitsuakki/minestrate/internal/api"
-	"github.com/mitsuakki/minestrate/internal/auth"
-	"github.com/mitsuakki/minestrate/internal/middleware"
-	"github.com/mitsuakki/minestrate/internal/server"
+	"github.com/mitsuakki/minestrate/logger"
+	"github.com/mitsuakki/minestrate/network"
+	"github.com/mitsuakki/minestrate/orchestrator"
 )
-
-type mockDockerClient struct{}
-
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{ID: name}, nil
-}
-func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
-	return nil
-}
-func (m *mockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
-	return container.CreateResponse{ID: containerName}, nil
-}
-func (m *mockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
-	return nil
-}
-func (m *mockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
-	return nil
-}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
@@ -57,11 +37,13 @@ func main() {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
 	}
+	logger.Init(cfg.Env)
 
 	if cfg.Env == "dev" {
-		claims := &auth.Claims{
+		claims := &service.Claims{
 			Scope: []string{"server:create"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
@@ -75,7 +57,7 @@ func main() {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 		ss, err := token.SignedString([]byte(cfg.Auth.JWTSecret))
 		if err != nil {
-			log.Printf("failed to generate dev token: %v", err)
+			slog.Error("failed to generate dev token", "error", err)
 		} else {
 			fmt.Printf("Dev JWT: %s\n", ss)
 		}
@@ -83,29 +65,39 @@ func main() {
 
 	r := chi.NewRouter()
 
-	var dockerClient server.DockerClient
+	var dockerClient network.DockerClient
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
-		dockerClient = &mockDockerClient{}
+		dockerClient = &network.MockDockerClient{}
 	} else {
+		opts := []client.Opt{client.WithAPIVersionNegotiation()}
+		if cfg.Docker.Socket != "" {
+			opts = append(opts, client.WithHost(cfg.Docker.Socket))
+		}
+
 		var err error
-		dockerClient, err = client.NewClientWithOpts(
-			client.WithHost(cfg.Docker.Socket),
-			client.WithAPIVersionNegotiation(),
-		)
+		dockerClient, err = client.NewClientWithOpts(opts...)
 		if err != nil {
-			log.Fatalf("failed to create docker client: %v", err)
+			slog.Error("failed to create docker client", "error", err)
+			os.Exit(1)
 		}
 	}
 
-	orchestrator, err := server.NewOrchestrator(cfg, dockerClient)
+	o, err := orchestrator.NewOrchestrator(cfg, dockerClient)
 	if err != nil {
-		log.Fatalf("failed to create orchestrator: %v", err)
+		slog.Error("failed to create orchestrator", "error", err)
+		os.Exit(1)
 	}
-	orchestrator.StartWorkers()
-	orchestrator.StartGC(1 * time.Minute)
-	h := api.NewHandler(orchestrator)
+	o.StartWorkers()
+	o.StartGC(1 * time.Minute)
+
+	refreshManager := service.NewRefreshManager(cfg.Auth.JWTSecret)
+	h := apihttp.NewHandler(o, refreshManager)
 
 	// ToDo : Public routes
+
+	r.Group(func(r chi.Router) {
+		r.Post("/auth/refresh", h.RefreshToken)
+	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.Auth.JWTSecret))
@@ -117,11 +109,17 @@ func main() {
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	fmt.Printf("Starting server on %s\n", addr)
+	slog.Info("Starting server", "addr", addr)
 
 	if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
-		log.Fatal(http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r))
+		if err := http.ListenAndServeTLS(addr, cfg.Server.TLSCert, cfg.Server.TLSKey, r); err != nil {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
 	}
 
-	log.Fatal(http.ListenAndServe(addr, r))
+	if err := http.ListenAndServe(addr, r); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
 }

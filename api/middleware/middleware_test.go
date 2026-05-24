@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/mitsuakki/minestrate/internal/auth"
+	"github.com/mitsuakki/minestrate/api/service"
 )
 
 func TestAuth(t *testing.T) {
 	secret := "test-secret"
-	
+
 	tests := []struct {
 		name           string
 		tokenFunc      func() string
@@ -21,7 +21,7 @@ func TestAuth(t *testing.T) {
 		{
 			name: "valid token",
 			tokenFunc: func() string {
-				claims := &auth.Claims{
+				claims := &service.Claims{
 					Scope: []string{"server:create"},
 					RegisteredClaims: jwt.RegisteredClaims{
 						Subject:   "player-123",
@@ -51,7 +51,7 @@ func TestAuth(t *testing.T) {
 		{
 			name: "wrong secret",
 			tokenFunc: func() string {
-				claims := &auth.Claims{
+				claims := &service.Claims{
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 					},
@@ -65,7 +65,7 @@ func TestAuth(t *testing.T) {
 		{
 			name: "expired token",
 			tokenFunc: func() string {
-				claims := &auth.Claims{
+				claims := &service.Claims{
 					RegisteredClaims: jwt.RegisteredClaims{
 						ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
 					},
@@ -82,7 +82,7 @@ func TestAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := Auth(secret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tt.name == "valid token" {
-					claims, ok := r.Context().Value(ClaimsKey).(*auth.Claims)
+					claims, ok := r.Context().Value(ClaimsKey).(*service.Claims)
 					if !ok {
 						t.Error("claims not found in context")
 					} else if claims.Subject != "player-123" {
@@ -142,7 +142,7 @@ func TestRequireScope(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})))
 
-			claims := &auth.Claims{
+			claims := &service.Claims{
 				Scope: tt.scopes,
 				RegisteredClaims: jwt.RegisteredClaims{
 					ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
