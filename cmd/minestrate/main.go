@@ -96,6 +96,8 @@ func main() {
 	o.StartWorkers()
 	o.StartGC(1 * time.Minute)
 
+	rateLimiter := middleware.NewRateLimiter(context.Background(), cfg.Auth.RateLimit.RefillRate, cfg.Auth.RateLimit.Capacity)
+
 	refreshManager := service.NewRefreshManager(cfg.Auth.JWTSecret)
 	h := apihttp.NewHandler(o, refreshManager)
 
@@ -107,6 +109,7 @@ func main() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.Auth.JWTSecret))
+		r.Use(rateLimiter.Middleware)
 
 		r.Get("/servers", h.ListServers)
 		r.Get("/servers/{id}", h.GetServer)
@@ -141,6 +144,7 @@ func main() {
 	<-stop
 	slog.Info("Shutting down gracefully...")
 
+	rateLimiter.Stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

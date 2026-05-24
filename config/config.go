@@ -17,8 +17,12 @@ type Config struct {
 	} `yaml:"server"`
 
 	Auth struct {
-		JWTSecret string `yaml:"jwt_secret"`
-		TokenTTL  int    `yaml:"token_ttl"`
+		JWTSecret   string `yaml:"jwt_secret"`
+		TokenTTL    int    `yaml:"token_ttl"`
+		RateLimit   struct {
+			RefillRate float64 `yaml:"refill_rate"`
+			Capacity   int     `yaml:"capacity"`
+		} `yaml:"rate_limit"`
 	} `yaml:"auth"`
 
 	Docker struct {
