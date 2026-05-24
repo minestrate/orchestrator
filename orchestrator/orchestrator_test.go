@@ -108,6 +108,7 @@ func TestGetAndListServers(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, &network.MockDockerClient{})
 
 	s1, _ := o.CreateServer(context.Background(), "minecraft", 10)
+	s2, _ := o.CreateServer(context.Background(), "minecraft", 5)
 
 	s, found := o.GetServer(s1.ID)
 	if !found {
@@ -124,6 +125,9 @@ func TestGetAndListServers(t *testing.T) {
 	if s != nil {
 		t.Fatal("expected nil for non-existent server")
 	}
+
+	// Stop s2
+	_ = s2.Transition(domain.EventStop)
 
 	list := o.ListServers()
 	if len(list) != 1 {

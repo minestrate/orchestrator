@@ -133,6 +133,9 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 		return err
 	}
 
+	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+	_ = o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
+
 	delete(o.servers, id)
 	o.ports.Release(s.Port)
 	return o.networks.Release(ctx, id)
@@ -161,6 +164,7 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 
 		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
+		_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
 		o.ports.Release(s.Port)
 		_ = o.networks.Release(cleanupCtx, s.ID)
@@ -204,7 +208,9 @@ func (o *Orchestrator) ListServers() []*domain.Server {
 	defer o.serversMutex.RUnlock()
 	list := make([]*domain.Server, 0, len(o.servers))
 	for _, s := range o.servers {
-		list = append(list, s)
+		if s.State() != domain.StateStopped {
+			list = append(list, s)
+		}
 	}
 	return list
 }
@@ -224,6 +230,9 @@ func (o *Orchestrator) worker(id int) {
 
 		if err != nil {
 			_ = s.Transition(domain.EventStop)
+			containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+			_ = o.docker.ContainerRemove(context.Background(), containerName, container.RemoveOptions{Force: true})
+
 			o.serversMutex.Lock()
 			delete(o.servers, s.ID)
 			o.ports.Release(s.Port)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type ServerState string
@@ -61,6 +62,7 @@ type Server struct {
 	Players int                    `json:"players"`
 	Address string                 `json:"address"`
 	Port    int                    `json:"port"`
+	Created time.Time              `json:"created"`
 	Network map[string]interface{} `json:"network"`
 	state   ServerState
 	hooks   []TransitionHook
@@ -73,6 +75,7 @@ func NewServer(id, game string, players int, address string, port int) *Server {
 		Players: players,
 		Address: address,
 		Port:    port,
+		Created: time.Now(),
 		state:   StatePending,
 	}
 }
@@ -120,6 +123,7 @@ func (s *Server) MarshalJSON() ([]byte, error) {
 		Players int                    `json:"players"`
 		Address string                 `json:"address"`
 		Port    int                    `json:"port"`
+		Created time.Time              `json:"created"`
 		Network map[string]interface{} `json:"network"`
 		State   ServerState            `json:"state"`
 	}{
@@ -128,6 +132,7 @@ func (s *Server) MarshalJSON() ([]byte, error) {
 		Players: s.Players,
 		Address: s.Address,
 		Port:    s.Port,
+		Created: s.Created,
 		Network: s.Network,
 		State:   s.state,
 	})

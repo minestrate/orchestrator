@@ -29,3 +29,6 @@ func (m *MockDockerClient) ContainerStart(ctx context.Context, containerID strin
 func (m *MockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
 	return nil
 }
+func (m *MockDockerClient) ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error {
+	return nil
+}
