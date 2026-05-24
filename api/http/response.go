@@ -1,6 +1,10 @@
 package http
 
-import "github.com/mitsuakki/minestrate/domain"
+import (
+	"time"
+
+	"github.com/mitsuakki/minestrate/domain"
+)
 
 type ServerResponse struct {
 	ID      string             `json:"id"`
@@ -8,6 +12,7 @@ type ServerResponse struct {
 	Players int                `json:"players"`
 	Address string             `json:"address"`
 	Port    int                `json:"port"`
+	Created time.Time          `json:"created"`
 	State   domain.ServerState `json:"state"`
 }
 
@@ -18,6 +23,7 @@ func ToServerResponse(s *domain.Server) ServerResponse {
 		Players: s.Players,
 		Address: s.Address,
 		Port:    s.Port,
+		Created: s.Created,
 		State:   s.State(),
 	}
 }

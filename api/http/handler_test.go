@@ -77,6 +77,15 @@ func TestListServers(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.CreateServer(w, req)
 
+	// Create another server and stop it
+	reqBody2 := CreateServerRequest{Game: "creative", Players: 10}
+	body2, _ := json.Marshal(reqBody2)
+	w2 := httptest.NewRecorder()
+	h.CreateServer(w2, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body2)))
+	var created2 ServerResponse
+	json.NewDecoder(w2.Body).Decode(&created2)
+	h.orchestrator.StopServer(context.Background(), created2.ID)
+
 	// List servers
 	req = httptest.NewRequest(http.MethodGet, "/servers", nil)
 	w = httptest.NewRecorder()
@@ -90,8 +99,12 @@ func TestListServers(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
+	// Should only have 1 server (the non-stopped one)
 	if len(resp) != 1 {
 		t.Errorf("Expected 1 server, got %d", len(resp))
+	}
+	if resp[0].Created.IsZero() {
+		t.Error("Expected Created field to be set")
 	}
 }
 
