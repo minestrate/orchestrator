@@ -10,15 +10,15 @@ Isolated Minecraft minigame servers, on demand. REST API over Docker, written in
 ```bash
 # 1. Clone and build
 git clone https://github.com/mitsuakki/minestrate
-cd minestrate
-go build -o minestrate ./cmd/minestrate
+cd tokens
+go build -o tokens ./cmd/tokens
 
 # 2. Configure
-cp config/config.example.yaml minestrate.yaml
-# edit minestrate.yaml
+cp config/config.example.yaml tokens.yaml
+# edit tokens.yaml
 
 # 3. Run
-./minestrate --config minestrate.yaml
+./tokens --config tokens.yaml
 ```
 
 ## Why
@@ -143,7 +143,7 @@ The `start_timeout` value should be set to $\mu_T + 10\sigma_T$ where $\mu_T$ is
 ## Configuration
 
 ```yaml
-# minestrate.yaml
+# tokens.yaml
 env: prod
 
 server:

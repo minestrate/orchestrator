@@ -7,26 +7,26 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	docker_network "github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
-	"github.com/mitsuakki/minestrate/config"
-	"github.com/mitsuakki/minestrate/domain"
-	"github.com/mitsuakki/minestrate/network"
+	"github.com/mitsuakki/minestrate/orchestrator/domain"
+	allocator2 "github.com/mitsuakki/minestrate/orchestrator/internal/allocator"
 )
 
 type Orchestrator struct {
-	cfg          *config.Config
+	cfg          *Config
 	startTime    time.Time
 	servers      map[string]*domain.Server
 	serversMutex sync.RWMutex
-	ports        *network.PortAllocator
-	networks     network.NetworkManager
-	docker       network.DockerClient
+	ports        *allocator2.PortAllocator
+	networks     allocator2.NetworkManager
+	docker       DockerClient
 	jobQueue     chan *domain.Server
 }
 
-func NewOrchestrator(cfg *config.Config, docker network.DockerClient) (*Orchestrator, error) {
-	var nm network.NetworkManager
+func NewOrchestrator(cfg *Config, docker DockerClient) (*Orchestrator, error) {
+	var nm allocator2.NetworkManager
 	var err error
 
 	mode := cfg.Network.Mode
@@ -36,32 +36,29 @@ func NewOrchestrator(cfg *config.Config, docker network.DockerClient) (*Orchestr
 
 	switch mode {
 	case "simple":
-		if mode == "simple" {
-			if err := network.EnsureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
-				return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
-			}
+		if err := allocator2.EnsureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
+			return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
 		}
-
-		nm = network.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
+		nm = allocator2.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
 	case "isolated":
-		nm, err = network.NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
+		nm, err = allocator2.NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
 		if err != nil {
 			return nil, err
 		}
 	default:
-		return nil, network.ErrInvalidNetworkMode
+		return nil, allocator2.ErrInvalidNetworkMode
 	}
 
 	if cfg.Network.EnableFallback && mode == "isolated" {
-		secondary := network.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
-		nm = network.NewFallbackNetworkManager(nm, secondary)
+		secondary := allocator2.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
+		nm = allocator2.NewFallbackNetworkManager(nm, secondary)
 	}
 
 	o := &Orchestrator{
 		cfg:       cfg,
 		startTime: time.Now(),
 		servers:   make(map[string]*domain.Server),
-		ports:     network.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
+		ports:     allocator2.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
 		networks:  nm,
 		docker:    docker,
 		jobQueue:  make(chan *domain.Server, cfg.Orchestrator.Workers),
@@ -70,11 +67,28 @@ func NewOrchestrator(cfg *config.Config, docker network.DockerClient) (*Orchestr
 	return o, nil
 }
 
-func (o *Orchestrator) CreateServer(ctx context.Context, game string, players int) (*domain.Server, error) {
+func (o *Orchestrator) CreateNetwork(ctx context.Context, name string, subnet string) error {
+	opts := docker_network.CreateOptions{
+		Driver: "bridge",
+	}
+	if subnet != "" {
+		opts.IPAM = &docker_network.IPAM{
+			Config: []docker_network.IPAMConfig{
+				{
+					Subnet: subnet,
+				},
+			},
+		}
+	}
+	_, err := o.docker.NetworkCreate(ctx, name, opts)
+	return err
+}
+
+func (o *Orchestrator) CreateServer(ctx context.Context, game string, players int, networkName string) (*domain.Server, error) {
 	o.serversMutex.Lock()
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
 		o.serversMutex.Unlock()
-		return nil, domain.ErrMaxServersReached
+		return nil, ErrMaxServersReached
 	}
 
 	port, err := o.ports.Acquire()
@@ -85,18 +99,35 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 
 	id := uuid.New().String()
 
-	netCfg, err := o.networks.Allocate(ctx, id)
-	if err != nil {
-		o.ports.Release(port)
-		o.serversMutex.Unlock()
-		return nil, err
+	var netName string
+	var subnet string
+	var gateway string
+	var isDynamic bool
+
+	if networkName != "" {
+		// Use user-provided network (non-dynamic, meaning it won't be deleted on container stop)
+		netName = networkName
+		isDynamic = false
+	} else {
+		// Allocate a dynamic isolated network subnet
+		netCfg, err := o.networks.Allocate(ctx, id)
+		if err != nil {
+			o.ports.Release(port)
+			o.serversMutex.Unlock()
+			return nil, err
+		}
+		netName = netCfg.NetworkName
+		subnet = netCfg.Subnet
+		gateway = netCfg.Gateway
+		isDynamic = true
 	}
 
 	s := domain.NewServer(id, game, players, "127.0.0.1", port)
-	s.Network = map[string]interface{}{
-		"network_name": netCfg.NetworkName,
-		"subnet":       netCfg.Subnet,
-		"gateway":      netCfg.Gateway,
+	s.Network = domain.NetworkInfo{
+		NetworkName: netName,
+		Subnet:      subnet,
+		Gateway:     gateway,
+		IsDynamic:   isDynamic,
 	}
 
 	o.servers[id] = s
@@ -107,7 +138,9 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 		delete(o.servers, id)
 		o.serversMutex.Unlock()
 		o.ports.Release(port)
-		_ = o.networks.Release(ctx, id)
+		if isDynamic {
+			_ = o.networks.Release(ctx, id)
+		}
 	}
 
 	select {
@@ -118,7 +151,7 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 		return nil, ctx.Err()
 	default:
 		cleanup()
-		return nil, domain.ErrJobQueueFull
+		return nil, ErrJobQueueFull
 	}
 }
 
@@ -128,19 +161,22 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 
 	s, ok := o.servers[id]
 	if !ok {
-		return domain.ErrServerNotFound
+		return ErrServerNotFound
 	}
 
 	if err := s.Transition(domain.EventStop); err != nil {
 		return err
 	}
 
-	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+	containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
 	_ = o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
 
 	delete(o.servers, id)
 	o.ports.Release(s.Port)
-	return o.networks.Release(ctx, id)
+	if s.Network.IsDynamic {
+		return o.networks.Release(ctx, id)
+	}
+	return nil
 }
 
 func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
@@ -149,11 +185,11 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 	o.serversMutex.RUnlock()
 
 	if !ok {
-		return domain.ErrServerNotFound
+		return ErrServerNotFound
 	}
 
 	if s.State() != domain.StateRunning {
-		return domain.ErrServerNotRunning
+		return ErrServerNotRunning
 	}
 
 	if err := s.Transition(domain.EventDrain); err != nil {
@@ -164,12 +200,14 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+		containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
 		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
 		_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
 		o.ports.Release(s.Port)
-		_ = o.networks.Release(cleanupCtx, s.ID)
+		if s.Network.IsDynamic {
+			_ = o.networks.Release(cleanupCtx, s.ID)
+		}
 
 		_ = s.Transition(domain.EventStop)
 	}()
@@ -214,18 +252,18 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 		go func(srv *domain.Server) {
 			defer wg.Done()
 
-			// We try to transition to Draining, but if it's already draining or stopping, we just proceed to stop container.
 			_ = srv.Transition(domain.EventDrain)
 
-			containerName := fmt.Sprintf("minestrate-%s-%s", srv.Game, srv.ID[:8])
+			containerName := fmt.Sprintf("tokens-%s-%s", srv.Game, srv.ID[:8])
 			fmt.Printf("Stopping container: %s\n", containerName)
 
-			// Use the provided context (which has the shutdown timeout)
 			_ = o.docker.ContainerStop(ctx, containerName, container.StopOptions{})
 			_ = o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
 
 			o.ports.Release(srv.Port)
-			_ = o.networks.Release(ctx, srv.ID)
+			if srv.Network.IsDynamic {
+				_ = o.networks.Release(ctx, srv.ID)
+			}
 
 			_ = srv.Transition(domain.EventStop)
 		}(s)
@@ -244,7 +282,6 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 		fmt.Println("Shutdown timed out, some containers may still be running.")
 	}
 }
-
 
 func (o *Orchestrator) GetServer(id string) (*domain.Server, bool) {
 	o.serversMutex.RLock()
@@ -296,16 +333,18 @@ func (o *Orchestrator) worker(_ int) {
 
 		if err != nil {
 			_ = s.Transition(domain.EventStop)
-			containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
+			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
 			_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
 			o.serversMutex.Lock()
 			delete(o.servers, s.ID)
 			o.ports.Release(s.Port)
-			_ = o.networks.Release(cleanupCtx, s.ID)
-			cancel()
+			if s.Network.IsDynamic {
+				_ = o.networks.Release(cleanupCtx, s.ID)
+			}
 			o.serversMutex.Unlock()
+			cancelCleanup()
 		}
 	}
 }
@@ -315,40 +354,14 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 		return err
 	}
 
-	// Startup timeout goroutine
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		timeout := time.Duration(o.cfg.Orchestrator.StartTimeout) * time.Second
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(timeout):
-			if s.State() != domain.StateRunning {
-				_ = s.Transition(domain.EventTimeout)
-				containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
-
-				o.serversMutex.Lock()
-				delete(o.servers, s.ID)
-				o.ports.Release(s.Port)
-				_ = o.networks.Release(cleanupCtx, s.ID)
-				cancel()
-				o.serversMutex.Unlock()
-			}
-		}
-	}()
-
-	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
+	containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
-			"minestrate.server_id": s.ID,
+			"tokens.server_id": s.ID,
 		},
 	}, &container.HostConfig{
-		NetworkMode: container.NetworkMode(s.Network["network_name"].(string)),
+		NetworkMode: container.NetworkMode(s.Network.NetworkName),
 		PortBindings: nat.PortMap{
 			nat.Port("19132/udp"): []nat.PortBinding{
 				{
@@ -367,9 +380,5 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 		return err
 	}
 
-	err = s.Transition(domain.EventRun)
-	if err == nil {
-		cancel()
-	}
-	return err
+	return s.Transition(domain.EventRun)
 }
