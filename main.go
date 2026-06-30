@@ -15,9 +15,8 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	api2 "github.com/mitsuakki/minestrate/orchestrator/internal/api"
-	"github.com/mitsuakki/minestrate/orchestrator/internal/config"
-	orchestrator2 "github.com/mitsuakki/minestrate/orchestrator/internal/orchestrator"
+	"github.com/mitsuakki/minestrate/orchestrator"
+	"github.com/mitsuakki/minestrate/orchestrator/api"
 )
 
 func main() {
@@ -38,7 +37,7 @@ func main() {
 		return
 	}
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := orchestrator.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "CONFIGURATION ERROR: %v\n", err)
 		os.Exit(1)
@@ -56,7 +55,7 @@ func main() {
 	slog.SetDefault(slog.New(handler))
 
 	if cfg.Env == "dev" {
-		claims := &api2.Claims{
+		claims := &api.Claims{
 			Scope: []string{"server:create"},
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
@@ -83,9 +82,9 @@ func main() {
 
 	r := chi.NewRouter()
 
-	var dockerClient orchestrator2.DockerClient
+	var dockerClient orchestrator.DockerClient
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
-		dockerClient = &orchestrator2.MockDockerClient{}
+		dockerClient = &orchestrator.MockDockerClient{}
 	} else {
 		opts := []client.Opt{client.WithAPIVersionNegotiation()}
 		if cfg.Docker.Socket != "" {
@@ -100,7 +99,7 @@ func main() {
 		}
 	}
 
-	o, err := orchestrator2.NewOrchestrator(cfg, dockerClient)
+	o, err := orchestrator.NewOrchestrator(cfg, dockerClient)
 	if err != nil {
 		slog.Error("failed to create orchestrator", "error", err)
 		os.Exit(1)
@@ -108,20 +107,20 @@ func main() {
 	o.StartWorkers()
 	o.StartGC(1 * time.Minute)
 
-	rateLimiter := api2.NewRateLimiter(context.Background(), cfg.Auth.RateLimit.RefillRate, cfg.Auth.RateLimit.Capacity)
-	h := api2.NewHandler(o)
+	rateLimiter := api.NewRateLimiter(context.Background(), cfg.Auth.RateLimit.RefillRate, cfg.Auth.RateLimit.Capacity)
+	h := api.NewHandler(o)
 
 	r.Get("/health", h.HealthCheck)
 
 	r.Group(func(r chi.Router) {
-		r.Use(api2.Auth(cfg.Auth.JWTSecret))
+		r.Use(api.Auth(cfg.Auth.JWTSecret))
 		r.Use(rateLimiter.Middleware)
 
 		r.Get("/servers", h.ListServers)
 		r.Get("/servers/{id}", h.GetServer)
 		r.Delete("/servers/{id}", h.DeleteServer)
-		r.With(api2.RequireScope("server:create")).Post("/servers", h.CreateServer)
-		r.With(api2.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
+		r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
+		r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
