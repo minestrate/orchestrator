@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	docker_network "github.com/docker/docker/api/types/network"
+	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
 	"github.com/mitsuakki/minestrate/orchestrator/domain"
@@ -68,12 +68,12 @@ func NewOrchestrator(cfg *Config, docker DockerClient) (*Orchestrator, error) {
 }
 
 func (o *Orchestrator) CreateNetwork(ctx context.Context, name string, subnet string) error {
-	opts := docker_network.CreateOptions{
+	opts := dockernetwork.CreateOptions{
 		Driver: "bridge",
 	}
 	if subnet != "" {
-		opts.IPAM = &docker_network.IPAM{
-			Config: []docker_network.IPAMConfig{
+		opts.IPAM = &dockernetwork.IPAM{
+			Config: []dockernetwork.IPAMConfig{
 				{
 					Subnet: subnet,
 				},
@@ -168,7 +168,7 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 		return err
 	}
 
-	containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
+	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 	_ = o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
 
 	delete(o.servers, id)
@@ -200,7 +200,7 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
+		containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 		_ = o.docker.ContainerStop(cleanupCtx, containerName, container.StopOptions{})
 		_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
@@ -254,7 +254,7 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 
 			_ = srv.Transition(domain.EventDrain)
 
-			containerName := fmt.Sprintf("tokens-%s-%s", srv.Game, srv.ID[:8])
+			containerName := fmt.Sprintf("minestrate-%s-%s", srv.Game, srv.ID[:8])
 			fmt.Printf("Stopping container: %s\n", containerName)
 
 			_ = o.docker.ContainerStop(ctx, containerName, container.StopOptions{})
@@ -333,7 +333,7 @@ func (o *Orchestrator) worker(_ int) {
 
 		if err != nil {
 			_ = s.Transition(domain.EventStop)
-			containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
+			containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
 			_ = o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true})
 
@@ -354,11 +354,11 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 		return err
 	}
 
-	containerName := fmt.Sprintf("tokens-%s-%s", s.Game, s.ID[:8])
+	containerName := fmt.Sprintf("minestrate-%s-%s", s.Game, s.ID[:8])
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
-			"tokens.server_id": s.ID,
+			"minestrate.server_id": s.ID,
 		},
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(s.Network.NetworkName),
