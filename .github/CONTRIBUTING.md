@@ -30,17 +30,21 @@ Before opening a pull request:
 * Provide documentation for exported symbols (`TypeName`, `FunctionName`). Unexported symbols
   should be documented unless trivial and self-explanatory.
 * Keep packages honest about their layer:
-    - `domain/` must not import `net/http`, Docker SDK types, or anything from `network/` or
-      `api/`. If your change requires this, the logic likely belongs in a different package.
-    - `network/` owns all Docker interaction. Anything that talks to the Docker API goes here,
-      behind an interface that can be mocked (see `docker_mock.go`).
-    - `api/http/` owns request parsing, response shaping, and status code mapping. Domain errors
+    - `domain/` must not import `net/http`, Docker SDK types, or anything from `internal/allocator/`
+      or `api/`. If your change requires this, the logic likely belongs in a different package.
+    - `dockerclient/` owns the canonical Docker client interface and its mock. All packages that
+      talk to the Docker API depend on this package. Do not define separate Docker client
+      interfaces elsewhere.
+    - `internal/allocator/` owns Docker network lifecycle (create, remove, inspect) behind
+      `NetworkManager`. Container operations (create, start, stop, remove) are called through the
+      `dockerclient.Client` interface from the orchestrator package.
+    - `api/` owns request parsing, response shaping, and status code mapping. Domain errors
       (e.g. `ErrInvalidTransition`) are translated to HTTP status codes here, not in `domain/`.
 * **FSM invariants are non-negotiable.** A server has exactly five lifecycle states, and state may
   only change via a validated transition. If your change adds a new state or transition path:
     - Update the transition table in `domain/fsm.go` and the table-driven tests in
       `domain/fsm_test.go` covering every legal and illegal transition pair, not just the new one.
-    - Invalid transitions must return a typed domain error, which `api/http` maps to `409
+    - Invalid transitions must return a typed domain error, which `api/` maps to `409
       Conflict`. Never return a generic error or a different status code for this case.
     - If the transition can be triggered concurrently (HTTP request racing a Docker lifecycle
       callback), make sure the FSM mutation is guarded — add a test that exercises concurrent

@@ -3,21 +3,7 @@ package allocator
 import (
 	"context"
 	"testing"
-
-	"github.com/docker/docker/api/types/network"
 )
-
-type mockDockerClient struct{}
-
-func (m *mockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{ID: name}, nil
-}
-func (m *mockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
-	return nil
-}
-func (m *mockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
-	return network.Inspect{}, nil
-}
 
 func TestSimpleNetworkManager(t *testing.T) {
 	nm := NewSimpleNetworkManager("test-net")

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/docker/docker/api/types/network"
+	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
 )
 
 var (
@@ -16,12 +17,6 @@ var (
 	ErrNetworkNotFound    = errors.New("network not found")
 	ErrInvalidNetworkMode = errors.New("invalid network mode")
 )
-
-type DockerClient interface {
-	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
-	NetworkRemove(ctx context.Context, networkID string) error
-	NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error)
-}
 
 type NetworkConfig struct {
 	NetworkName string `json:"network_name"`
@@ -49,7 +44,7 @@ func NewSimpleNetworkManager(networkName string) *SimpleNetworkManager {
 	}
 }
 
-func EnsureNetwork(ctx context.Context, docker DockerClient, name string) error {
+func EnsureNetwork(ctx context.Context, docker dockerclient.Client, name string) error {
 	_, err := docker.NetworkInspect(ctx, name, network.InspectOptions{})
 	if err == nil {
 		return nil
@@ -90,7 +85,7 @@ func (m *SimpleNetworkManager) ListActive() map[string]*NetworkConfig {
 
 // IsolatedSubnetManager implements dynamic isolated subnet mode.
 type IsolatedSubnetManager struct {
-	docker      DockerClient
+	docker      dockerclient.Client
 	baseSubnet  *net.IPNet
 	subnets     []*net.IPNet
 	subnetToIdx map[string]int
@@ -100,10 +95,15 @@ type IsolatedSubnetManager struct {
 	mu          sync.RWMutex
 }
 
-func NewIsolatedSubnetManager(docker DockerClient, subnetBlock string) (*IsolatedSubnetManager, error) {
+func NewIsolatedSubnetManager(docker dockerclient.Client, subnetBlock string) (*IsolatedSubnetManager, error) {
 	_, ipnet, err := net.ParseCIDR(subnetBlock)
 	if err != nil {
 		return nil, err
+	}
+
+	// Reject IPv6 — partitionSubnet uses int shifts that overflow for 128-bit addresses.
+	if ipnet.IP.To4() == nil {
+		return nil, fmt.Errorf("subnet_block must be an IPv4 CIDR, got %q", subnetBlock)
 	}
 
 	subnets, err := partitionSubnet(ipnet, 28)
@@ -162,7 +162,7 @@ func (m *IsolatedSubnetManager) Allocate(ctx context.Context, gameID string) (*N
 			if atomic.CompareAndSwapUint64(&m.bits[i], val, newVal) {
 				idx := i*64 + bitIdx
 				subnet := m.subnets[idx].String()
-				name := fmt.Sprintf("tokens-net-%d", idx)
+				name := fmt.Sprintf("minestrate-net-%d", idx)
 
 				_, err := m.docker.NetworkCreate(ctx, name, network.CreateOptions{
 					Driver: "bridge",
@@ -203,6 +203,8 @@ func (m *IsolatedSubnetManager) Release(ctx context.Context, gameID string) erro
 		m.mu.Unlock()
 		return nil
 	}
+	delete(m.active, gameID)
+	delete(m.idToSubnet, gameID)
 	m.mu.Unlock()
 
 	idx, ok := m.subnetToIdx[subnet]
@@ -210,15 +212,10 @@ func (m *IsolatedSubnetManager) Release(ctx context.Context, gameID string) erro
 		return nil
 	}
 
-	name := fmt.Sprintf("tokens-net-%d", idx)
+	name := fmt.Sprintf("minestrate-net-%d", idx)
 	if err := m.docker.NetworkRemove(ctx, name); err != nil {
-		return err
+		return err // keep the bit reserved so the caller can retry
 	}
-
-	m.mu.Lock()
-	delete(m.active, gameID)
-	delete(m.idToSubnet, gameID)
-	m.mu.Unlock()
 
 	m.releaseIndex(idx)
 	return nil
@@ -290,13 +287,22 @@ func (m *FallbackNetworkManager) Allocate(ctx context.Context, gameID string) (*
 func (m *FallbackNetworkManager) Release(ctx context.Context, gameID string) error {
 	m.mu.Lock()
 	primary := m.isPrimary[gameID]
-	delete(m.isPrimary, gameID)
 	m.mu.Unlock()
 
+	var err error
 	if primary {
-		return m.primary.Release(ctx, gameID)
+		err = m.primary.Release(ctx, gameID)
+	} else {
+		err = m.secondary.Release(ctx, gameID)
 	}
-	return m.secondary.Release(ctx, gameID)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	delete(m.isPrimary, gameID)
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *FallbackNetworkManager) ListActive() map[string]*NetworkConfig {

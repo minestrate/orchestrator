@@ -17,17 +17,18 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/mitsuakki/minestrate/orchestrator"
 	"github.com/mitsuakki/minestrate/orchestrator/api"
+	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
 )
 
 func main() {
-	configPath := flag.String("config", "tokens.yaml", "path to config file")
+	configPath := flag.String("config", "minestrate.yaml", "path to config file")
 	version := flag.Bool("version", false, "print version")
 	flag.Parse()
 
-	if len(os.Args) < 2 && *configPath == "tokens.yaml" {
+	if len(os.Args) < 2 && *configPath == "minestrate.yaml" {
 		if _, err := os.Stat(*configPath); os.IsNotExist(err) {
 			fmt.Println("Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.")
-			fmt.Printf("Default config 'tokens.yaml' not found. Use --config to specify a path.\n")
+			fmt.Printf("Default config 'minestrate.yaml' not found. Use --config to specify a path.\n")
 			return
 		}
 	}
@@ -43,7 +44,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Inline logger configuration: replaces the need for a separate internal/logger package.
 	var handler slog.Handler
 	if cfg.Env == "prod" {
 		handler = slog.NewJSONHandler(os.Stdout, nil)
@@ -61,7 +61,7 @@ func main() {
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
 				NotBefore: jwt.NewNumericDate(time.Now()),
-				Issuer:    "tokens-dev",
+				Issuer:    "minestrate-dev",
 				Subject:   "admin",
 			},
 		}
@@ -82,9 +82,9 @@ func main() {
 
 	r := chi.NewRouter()
 
-	var dockerClient orchestrator.DockerClient
+	var dockerClient dockerclient.Client
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
-		dockerClient = &orchestrator.MockDockerClient{}
+		dockerClient = &dockerclient.MockClient{}
 	} else {
 		opts := []client.Opt{client.WithAPIVersionNegotiation()}
 		if cfg.Docker.Socket != "" {
@@ -129,7 +129,6 @@ func main() {
 		Handler: r,
 	}
 
-	// Signal handling for graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 

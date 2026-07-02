@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mitsuakki/minestrate/orchestrator"
-	"github.com/mitsuakki/minestrate/orchestrator/internal/allocator"
+	"github.com/mitsuakki/minestrate/orchestrator/domain"
 )
 
 type Handler struct {
@@ -57,7 +57,7 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players, req.NetworkName)
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrMaxServersReached) ||
-			errors.Is(err, allocator.ErrNoPortsAvailable) ||
+			errors.Is(err, orchestrator.ErrNoPortsAvailable) ||
 			errors.Is(err, orchestrator.ErrJobQueueFull) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
@@ -125,6 +125,11 @@ func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, orchestrator.ErrServerNotRunning) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		var invalidTransition *domain.ErrInvalidTransition
+		if errors.As(err, &invalidTransition) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"hash/fnv"
 	"net/http"
 	"sync"
 	"time"
@@ -9,26 +10,36 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const rateLimiterShards = 16
+
 type limiterBucket struct {
 	limiter    *rate.Limiter
 	lastAccess time.Time
 }
 
-type RateLimiter struct {
-	limiters map[string]*limiterBucket
+type limiterShard struct {
 	mu       sync.Mutex
-	rate     rate.Limit
-	burst    int
-	cancel   context.CancelFunc
+	limiters map[string]*limiterBucket
+}
+
+type RateLimiter struct {
+	shards [rateLimiterShards]*limiterShard
+	rate   rate.Limit
+	burst  int
+	cancel context.CancelFunc
 }
 
 func NewRateLimiter(ctx context.Context, r float64, b int) *RateLimiter {
 	ctx, cancel := context.WithCancel(ctx)
 	rl := &RateLimiter{
-		limiters: make(map[string]*limiterBucket),
-		rate:     rate.Limit(r),
-		burst:    b,
-		cancel:   cancel,
+		rate:   rate.Limit(r),
+		burst:  b,
+		cancel: cancel,
+	}
+	for i := range rl.shards {
+		rl.shards[i] = &limiterShard{
+			limiters: make(map[string]*limiterBucket),
+		}
 	}
 
 	go rl.cleanup(ctx)
@@ -39,20 +50,28 @@ func (rl *RateLimiter) Stop() {
 	rl.cancel()
 }
 
+func (rl *RateLimiter) shardIdx(subject string) int {
+	h := fnv.New32a()
+	h.Write([]byte(subject))
+	return int(h.Sum32()) % rateLimiterShards
+}
+
 func (rl *RateLimiter) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			rl.mu.Lock()
 			now := time.Now()
-			for sub, b := range rl.limiters {
-				if now.Sub(b.lastAccess) > 5*time.Minute {
-					delete(rl.limiters, sub)
+			for _, sh := range rl.shards {
+				sh.mu.Lock()
+				for sub, b := range sh.limiters {
+					if now.Sub(b.lastAccess) > 5*time.Minute {
+						delete(sh.limiters, sub)
+					}
 				}
+				sh.mu.Unlock()
 			}
-			rl.mu.Unlock()
 		case <-ctx.Done():
 			return
 		}
@@ -62,21 +81,22 @@ func (rl *RateLimiter) cleanup(ctx context.Context) {
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := r.Context().Value(ClaimsKey).(*Claims)
-		if !ok || claims.Subject == "" {
+		if !ok || claims == nil || claims.Subject == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		rl.mu.Lock()
-		b, ok := rl.limiters[claims.Subject]
+		sh := rl.shards[rl.shardIdx(claims.Subject)]
+		sh.mu.Lock()
+		b, ok := sh.limiters[claims.Subject]
 		if !ok {
 			b = &limiterBucket{
 				limiter: rate.NewLimiter(rl.rate, rl.burst),
 			}
-			rl.limiters[claims.Subject] = b
+			sh.limiters[claims.Subject] = b
 		}
 		b.lastAccess = time.Now()
-		rl.mu.Unlock()
+		sh.mu.Unlock()
 
 		if !b.limiter.Allow() {
 			w.Header().Set("Retry-After", "1")

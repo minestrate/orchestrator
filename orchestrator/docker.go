@@ -1,46 +1,15 @@
+// Package orchestrator re-exports dockerclient.Client and dockerclient.MockClient
+// for convenience so existing callers continue to compile without changing imports.
 package orchestrator
 
 import (
-	"context"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
 )
 
-type DockerClient interface {
-	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
-	NetworkRemove(ctx context.Context, networkID string) error
-	NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error)
+// DockerClient is the canonical Docker API interface.
+// Deprecated: import github.com/mitsuakki/minestrate/orchestrator/dockerclient directly.
+type DockerClient = dockerclient.Client
 
-	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
-	ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
-	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
-}
-
-// MockDockerClient is a mock implementation of DockerClient for development and testing purposes.
-type MockDockerClient struct{}
-
-func (m *MockDockerClient) NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{ID: name}, nil
-}
-func (m *MockDockerClient) NetworkRemove(ctx context.Context, networkID string) error {
-	return nil
-}
-func (m *MockDockerClient) NetworkInspect(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error) {
-	return network.Inspect{}, nil
-}
-
-func (m *MockDockerClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
-	return container.CreateResponse{ID: containerName}, nil
-}
-func (m *MockDockerClient) ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error {
-	return nil
-}
-func (m *MockDockerClient) ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error {
-	return nil
-}
-func (m *MockDockerClient) ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error {
-	return nil
-}
+// MockDockerClient is a no-op implementation of DockerClient.
+// Deprecated: use dockerclient.MockClient instead.
+type MockDockerClient = dockerclient.MockClient

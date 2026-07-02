@@ -52,7 +52,7 @@ func RequireScope(scope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value(ClaimsKey).(*Claims)
-			if !ok {
+			if !ok || claims == nil {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
