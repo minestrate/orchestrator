@@ -122,6 +122,14 @@ func (s *Server) Transition(event ServerEvent) error {
 	return nil
 }
 
+func (s *Server) ContainerName() string {
+	id := s.ID
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return fmt.Sprintf("minestrate-%s-%s", s.Game, id)
+}
+
 func (s *Server) MarshalJSON() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"net"
 	"os"
 
+	"github.com/docker/go-units"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,8 +52,9 @@ type Config struct {
 	Env    string `yaml:"env"`
 	Server struct {
 		Port    int    `yaml:"port"`
-		TLSCert string `yaml:"tls_cert"`
-		TLSKey  string `yaml:"tls_key"`
+		TLSCert           string `yaml:"tls_cert"`
+		TLSKey            string `yaml:"tls_key"`
+		AdvertisedAddress string `yaml:"advertised_address"`
 	} `yaml:"server"`
 
 	Auth struct {
@@ -113,11 +116,9 @@ func (c *Config) Validate() error {
 	if len(c.Auth.JWTSecret) < 32 {
 		return fmt.Errorf("auth.jwt_secret must be at least 32 bytes, got %d", len(c.Auth.JWTSecret))
 	}
-	// Shannon entropy for a 32-char random string should be > 4.0
 	if shannonEntropy(c.Auth.JWTSecret) < 4.0 {
 		return fmt.Errorf("auth.jwt_secret is not secure enough (too low entropy)")
 	}
-	// Chi-square test: limit deviation from uniformity. A threshold of 50 is loose enough for ASCII, tight for weak patterns.
 	if chiSquareUniformity(c.Auth.JWTSecret) > 50.0 {
 		return fmt.Errorf("auth.jwt_secret is not secure enough (statistically non-uniform)")
 	}
@@ -130,6 +131,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("docker.image is required")
 	}
 
+	if c.Docker.MemoryLimit != "" {
+		if _, err := units.RAMInBytes(c.Docker.MemoryLimit); err != nil {
+			return fmt.Errorf("docker.memory_limit: %w", err)
+		}
+	}
+
 	if c.Network.Mode == "isolated" {
 		if c.Network.SubnetBlock == "" {
 			return fmt.Errorf("network.subnet_block is required in isolated mode")
@@ -140,20 +147,29 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("invalid network.subnet_block: %w", err)
 		}
 
-		ones, _ := ipnet.Mask.Size()
+		ones, bits := ipnet.Mask.Size()
+		if bits != 32 {
+			return fmt.Errorf("network.subnet_block must be an IPv4 CIDR, got IPv%d", bits)
+		}
 		if ones > 28 {
 			return fmt.Errorf("network.subnet_block must be at least a /28, got /%d", ones)
 		}
 
 		numSubnets := 1 << (28 - ones)
 		if c.Orchestrator.MaxServers > numSubnets {
-			fmt.Fprintf(os.Stderr, "WARNING: orchestrator.max_servers (%d) exceeds available /28 subnets in %s (%d)\n",
-				c.Orchestrator.MaxServers, c.Network.SubnetBlock, numSubnets)
+			slog.Warn("orchestrator.max_servers exceeds available /28 subnets",
+				"max_servers", c.Orchestrator.MaxServers,
+				"subnet_block", c.Network.SubnetBlock,
+				"available_subnets", numSubnets)
 		}
 	}
 
 	if c.Network.Mode == "simple" && c.Network.DefaultNetwork == "" {
 		return fmt.Errorf("network.default_network is required in simple mode")
+	}
+
+	if c.Network.Mode == "isolated" && c.Network.EnableFallback && c.Network.DefaultNetwork == "" {
+		return fmt.Errorf("network.default_network is required when fallback is enabled in isolated mode")
 	}
 
 	return nil
