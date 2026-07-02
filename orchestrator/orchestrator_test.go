@@ -9,7 +9,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/mitsuakki/minestrate/orchestrator/domain"
-	"github.com/mitsuakki/minestrate/orchestrator/internal/allocator"
 )
 
 func mockConfig() *Config {
@@ -96,7 +95,7 @@ func TestCreateServer_NoPorts(t *testing.T) {
 
 	// No ports available
 	s3, err := o.CreateServer(context.Background(), "minecraft", 10, "")
-	if !errors.Is(err, allocator.ErrNoPortsAvailable) {
+	if !errors.Is(err, ErrNoPortsAvailable) {
 		t.Fatalf("expected ErrNoPortsAvailable, got %v", err)
 	}
 	if s3 != nil {
