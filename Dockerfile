@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o tokens ./cmd/minestrate
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o minestrate .
 
 # Run stage
 FROM alpine:latest
