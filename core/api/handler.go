@@ -29,19 +29,21 @@ func MetricsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	uptime, active, free, full := h.orchestrator.Metrics()
+	dockerOK := h.orchestrator.DockerReachable(r.Context())
 
 	status := http.StatusOK
-	if full {
+	if full || !dockerOK {
 		status = http.StatusServiceUnavailable
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":         "ok",
-		"uptime_seconds": int64(uptime),
-		"servers_active": active,
-		"port_pool_free": free,
+		"status":          "ok",
+		"uptime_seconds":  int64(uptime),
+		"servers_active":  active,
+		"port_pool_free":  free,
+		"docker_reachable": dockerOK,
 	})
 }
 
@@ -62,7 +64,14 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players, req.NetworkName, req.TTLSeconds, req.WebhookURL, req.Labels)
+	s, err := h.orchestrator.CreateServer(r.Context(), orchestrator.CreateServerOptions{
+		Game:        req.Game,
+		Players:     req.Players,
+		NetworkName: req.NetworkName,
+		TTLSeconds:  req.TTLSeconds,
+		WebhookURL:  req.WebhookURL,
+		Labels:      req.Labels,
+	})
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrMaxServersReached) ||
 			errors.Is(err, orchestrator.ErrNoPortsAvailable) ||
