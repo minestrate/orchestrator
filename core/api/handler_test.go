@@ -21,7 +21,6 @@ func setupTestHandler() *Handler {
 	cfg.Orchestrator.StartTimeout = 30
 	cfg.Ports.RangeStart = 19132
 	cfg.Ports.RangeEnd = 19142
-	cfg.Network.Mode = "simple"
 	cfg.Network.DefaultNetwork = "test-net"
 
 	o, _ := orchestrator.NewOrchestrator(cfg, &orchestrator.MockDockerClient{})
