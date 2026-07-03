@@ -15,9 +15,9 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/mitsuakki/minestrate/orchestrator"
-	"github.com/mitsuakki/minestrate/orchestrator/api"
-	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
+	orchestrator "github.com/mitsuakki/minestrate/core"
+	"github.com/mitsuakki/minestrate/core/api"
+	"github.com/mitsuakki/minestrate/core/dockerclient"
 )
 
 func main() {

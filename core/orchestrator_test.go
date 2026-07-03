@@ -1,4 +1,4 @@
-package orchestrator
+package core
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/mitsuakki/minestrate/orchestrator/domain"
+	"github.com/mitsuakki/minestrate/core/domain"
 )
 
 func mockConfig() *Config {

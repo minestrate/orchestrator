@@ -3,7 +3,7 @@ package api
 import (
 	"time"
 
-	"github.com/mitsuakki/minestrate/orchestrator/domain"
+	"github.com/mitsuakki/minestrate/core/domain"
 )
 
 type CreateServerRequest struct {

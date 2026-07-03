@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/mitsuakki/minestrate/orchestrator"
-	"github.com/mitsuakki/minestrate/orchestrator/api"
-	"github.com/mitsuakki/minestrate/orchestrator/domain"
+	orchestrator "github.com/mitsuakki/minestrate/core"
+	"github.com/mitsuakki/minestrate/core/api"
+	"github.com/mitsuakki/minestrate/core/domain"
 )
 
 func TestServerLifecycle_Integration(t *testing.T) {

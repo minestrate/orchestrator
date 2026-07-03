@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/docker/docker/api/types/network"
-	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
+	"github.com/mitsuakki/minestrate/core/dockerclient"
 )
 
 var (

@@ -1,4 +1,4 @@
-package orchestrator
+package core
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/docker/go-units"
 	"github.com/google/uuid"
-	"github.com/mitsuakki/minestrate/orchestrator/dockerclient"
-	"github.com/mitsuakki/minestrate/orchestrator/domain"
-	allocator2 "github.com/mitsuakki/minestrate/orchestrator/internal/allocator"
+	"github.com/mitsuakki/minestrate/core/dockerclient"
+	"github.com/mitsuakki/minestrate/core/domain"
+	allocator2 "github.com/mitsuakki/minestrate/core/internal/allocator"
 )
 
 type Orchestrator struct {

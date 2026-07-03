@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/mitsuakki/minestrate/orchestrator"
-	"github.com/mitsuakki/minestrate/orchestrator/domain"
+	orchestrator "github.com/mitsuakki/minestrate/core"
+	"github.com/mitsuakki/minestrate/core/domain"
 )
 
 type Handler struct {
