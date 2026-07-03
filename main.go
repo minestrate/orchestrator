@@ -111,6 +111,7 @@ func main() {
 	h := api.NewHandler(o)
 
 	r.Get("/health", h.HealthCheck)
+	r.Get("/metrics", api.MetricsHandler)
 
 	r.Group(func(r chi.Router) {
 		r.Use(api.Auth(cfg.Auth.JWTSecret))

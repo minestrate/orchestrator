@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -279,6 +280,30 @@ func TestGetServer(t *testing.T) {
 			t.Errorf("Expected status 404, got %d", w.Code)
 		}
 	})
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	MetricsHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	// Must include our custom metrics.
+	for _, name := range []string{
+		"minestrate_servers_active",
+		"minestrate_pool_utilization",
+		"minestrate_spawn_duration_seconds",
+		"minestrate_port_pool_free",
+	} {
+		if !strings.Contains(body, name) {
+			t.Errorf("Expected metric %q in response body", name)
+		}
+	}
 }
 
 func TestHealthCheck(t *testing.T) {

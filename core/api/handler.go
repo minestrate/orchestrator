@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	orchestrator "github.com/mitsuakki/minestrate/core"
 	"github.com/mitsuakki/minestrate/core/domain"
 )
@@ -15,8 +16,15 @@ type Handler struct {
 	orchestrator *orchestrator.Orchestrator
 }
 
+var metricsHandler = promhttp.Handler()
+
 func NewHandler(o *orchestrator.Orchestrator) *Handler {
 	return &Handler{orchestrator: o}
+}
+
+// MetricsHandler exposes Prometheus metrics. No auth — intended for internal scraping.
+func MetricsHandler(w http.ResponseWriter, r *http.Request) {
+	metricsHandler.ServeHTTP(w, r)
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {

@@ -308,6 +308,7 @@ func (o *Orchestrator) GC() {
 	var expiredIDs []string
 
 	o.serversMutex.Lock()
+	o.updateMetrics()
 	for id, s := range o.servers {
 		if s.State() == domain.StateStopped {
 			delete(o.servers, id)
@@ -639,7 +640,9 @@ func (o *Orchestrator) worker(_ int) {
 	for s := range o.jobQueue {
 		ctx, cancel := context.WithTimeout(o.ctx, time.Duration(o.cfg.Orchestrator.StartTimeout)*time.Second)
 
+		start := time.Now()
 		err := o.processJob(ctx, s)
+		observeSpawn(time.Since(start).Seconds())
 		cancel()
 
 		if err != nil {
