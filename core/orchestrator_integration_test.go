@@ -40,7 +40,7 @@ func TestDockerIntegration(t *testing.T) {
 	cfg.Orchestrator.MaxServers = 5
 	cfg.Orchestrator.Workers = 1
 	cfg.Orchestrator.StartTimeout = 60
-	cfg.Network.DefaultNetwork = "minestrate-test"
+	cfg.Network.DefaultNetwork = "bridge"
 
 	o, err := NewOrchestrator(cfg, cli)
 	if err != nil {

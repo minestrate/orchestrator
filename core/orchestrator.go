@@ -752,6 +752,7 @@ func (o *Orchestrator) worker(_ int) {
 		cancel()
 
 		if err != nil {
+			slog.Error("worker job failed", "server_id", s.ID, "error", err)
 			_ = s.Transition(domain.EventStop)
 			containerName := s.ContainerName()
 			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
@@ -787,7 +788,7 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	}
 
 	if err := s.Transition(domain.EventStart); err != nil {
-		return err
+		return fmt.Errorf("transition start: %w", err)
 	}
 
 	containerName := s.ContainerName()
@@ -814,12 +815,15 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	}, nil, nil, containerName)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("container create: %w", err)
 	}
 
 	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return err
+		return fmt.Errorf("container start: %w", err)
 	}
 
-	return s.Transition(domain.EventRun)
+	if err := s.Transition(domain.EventRun); err != nil {
+		return fmt.Errorf("transition run: %w", err)
+	}
+	return nil
 }
