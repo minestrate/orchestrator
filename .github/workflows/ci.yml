@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/* ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  build:
-    name: Build and Test
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -23,11 +23,40 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Run lint
-        run: make lint
+      - name: Run tests
+        run: go test -race -v ./...
 
-      # - name: Run audit
-        # run: make audit
-        
-      - name: Build
-        run: make build
+  integration:
+    name: Integration (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run integration tests
+        run: go test -tags=integration -v ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run lint
+        run: go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./...

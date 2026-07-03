@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,21 +21,32 @@ import (
 	"github.com/google/uuid"
 	"github.com/mitsuakki/minestrate/core/dockerclient"
 	"github.com/mitsuakki/minestrate/core/domain"
-	allocator2 "github.com/mitsuakki/minestrate/core/internal/allocator"
+	"github.com/mitsuakki/minestrate/core/internal/allocator"
 )
 
 type Orchestrator struct {
-	cfg          *Config
-	startTime    time.Time
-	servers      map[string]*domain.Server
-	serversMutex sync.RWMutex
-	ports        *allocator2.PortAllocator
-	networks     allocator2.NetworkManager
-	docker       dockerclient.Client
-	jobQueue     chan *domain.Server
-	ctx          context.Context
-	cancel       context.CancelFunc
-	startOnce    sync.Once
+	cfg            *Config
+	startTime      time.Time
+	servers        map[string]*domain.Server
+	serversMutex   sync.RWMutex
+	ports          *allocator.PortAllocator
+	defaultNetwork string
+	docker         dockerclient.Client
+	store          *Store
+	jobQueue       chan *domain.Server
+	ctx            context.Context
+	cancel         context.CancelFunc
+	startOnce      sync.Once
+}
+
+// CreateServerOptions holds all parameters for creating a server.
+type CreateServerOptions struct {
+	Game        string
+	Players     int
+	NetworkName string
+	TTLSeconds  int
+	WebhookURL  string
+	Labels      map[string]string
 }
 
 // ServerHealth summarizes the health of a single server.
@@ -46,52 +60,113 @@ type ServerHealth struct {
 }
 
 func NewOrchestrator(cfg *Config, docker dockerclient.Client) (*Orchestrator, error) {
-	var nm allocator2.NetworkManager
-	var err error
-
-	mode := cfg.Network.Mode
-	if mode == "" {
-		mode = "simple"
+	// Ensure the default network exists (ignore "already exists" errors).
+	if err := ensureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
+		return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
 	}
 
-	switch mode {
-	case "simple":
-		if err := allocator2.EnsureNetwork(context.Background(), docker, cfg.Network.DefaultNetwork); err != nil {
-			return nil, fmt.Errorf("failed to ensure network %q: %w", cfg.Network.DefaultNetwork, err)
+	// Open persistent store if DataDir is configured.
+	// Without a data dir, persistence is disabled (useful for tests).
+	var store *Store
+	if cfg.DataDir != "" {
+		if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+			return nil, fmt.Errorf("create data dir: %w", err)
 		}
-		nm = allocator2.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
-	case "isolated":
-		nm, err = allocator2.NewIsolatedSubnetManager(docker, cfg.Network.SubnetBlock)
-		if err != nil {
-			return nil, err
+		var openErr error
+		store, openErr = OpenStore(cfg.DataDir + "/minestrate.db")
+		if openErr != nil {
+			return nil, fmt.Errorf("open store: %w", openErr)
 		}
-	default:
-		return nil, allocator2.ErrInvalidNetworkMode
-	}
-
-	if cfg.Network.EnableFallback && mode == "isolated" {
-		secondary := allocator2.NewSimpleNetworkManager(cfg.Network.DefaultNetwork)
-		nm = allocator2.NewFallbackNetworkManager(nm, secondary)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	o := &Orchestrator{
-		cfg:       cfg,
-		startTime: time.Now(),
-		servers:   make(map[string]*domain.Server),
-		ports:     allocator2.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
-		networks:  nm,
-		docker:    docker,
-		jobQueue:  make(chan *domain.Server, cfg.Orchestrator.Workers),
-		ctx:       ctx,
-		cancel:    cancel,
+		cfg:            cfg,
+		startTime:      time.Now(),
+		servers:        make(map[string]*domain.Server),
+		ports:          allocator.NewPortAllocator(cfg.Ports.RangeStart, cfg.Ports.RangeEnd),
+		defaultNetwork: cfg.Network.DefaultNetwork,
+		docker:         docker,
+		store:          store,
+		jobQueue:       make(chan *domain.Server, cfg.Orchestrator.Workers),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	// Clean up any orphaned containers from a previous crash.
 	o.cleanupOrphans()
 
+	// Recover persisted servers.
+	o.recoverServers()
+
 	return o, nil
+}
+
+// recoverServers loads persisted servers from the store and reconciles them
+// with Docker. Servers that were running but whose containers are gone are
+// marked stopped. Servers that are still running are re-registered.
+func (o *Orchestrator) recoverServers() {
+	servers, err := o.store.LoadServers()
+	if err != nil {
+		slog.Error("failed to load persisted servers", "error", err)
+		return
+	}
+
+	if len(servers) == 0 {
+		return
+	}
+
+	slog.Info("recovering persisted servers", "count", len(servers))
+	for _, s := range servers {
+		state := s.State()
+		switch state {
+		case domain.StateRunning:
+			// Verify the container still exists.
+			insp, err := o.docker.ContainerInspect(context.Background(), s.ContainerName())
+			if err != nil || insp.State == nil || !insp.State.Running {
+				slog.Info("recovered server container gone, marking stopped", "server_id", s.ID)
+				_ = s.Transition(domain.EventStop)
+				_ = o.store.DeleteServer(s.ID)
+				continue
+			}
+			// Container is alive — keep it.
+			o.registerServerHooks(s)
+			o.servers[s.ID] = s
+			slog.Info("recovered running server", "server_id", s.ID, "container", s.ContainerName())
+
+		case domain.StatePending, domain.StateStarting:
+			// Crashed mid-start — mark stopped and clean up.
+			slog.Info("recovered server in non-terminal state, marking stopped", "server_id", s.ID, "state", string(state))
+			_ = s.Transition(domain.EventStop)
+			_ = o.store.DeleteServer(s.ID)
+
+		default:
+			// Stopped, drained — clean up from store.
+			_ = o.store.DeleteServer(s.ID)
+		}
+	}
+}
+
+// registerServerHooks re-registers webhook and other hooks on a recovered server.
+func (o *Orchestrator) registerServerHooks(s *domain.Server) {
+	if s.WebhookURL != "" {
+		s.OnTransition(o.webhookHook(s))
+	}
+}
+
+// ensureNetwork creates a Docker bridge network if it doesn't exist.
+func ensureNetwork(ctx context.Context, cli dockerclient.Client, name string) error {
+	_, err := cli.NetworkInspect(ctx, name, dockernetwork.InspectOptions{})
+	if err == nil {
+		return nil // already exists
+	}
+	// Try to create; if it fails because another caller created it, ignore.
+	_, err = cli.NetworkCreate(ctx, name, dockernetwork.CreateOptions{Driver: "bridge"})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
 }
 
 // cleanupOrphans stops and removes any containers from a previous orchestrator run.
@@ -142,11 +217,22 @@ func (o *Orchestrator) CreateNetwork(ctx context.Context, name string, subnet st
 	return err
 }
 
-func (o *Orchestrator) CreateServer(ctx context.Context, game string, players int, networkName string, ttlSeconds int, webhookURL string, labels map[string]string) (*domain.Server, error) {
+func (o *Orchestrator) CreateServer(ctx context.Context, opts CreateServerOptions) (*domain.Server, error) {
 	o.serversMutex.Lock()
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
 		o.serversMutex.Unlock()
 		return nil, ErrMaxServersReached
+	}
+
+	// Check per-label limits.
+	for key, maxCount := range o.cfg.Orchestrator.MaxServersPerLabel {
+		if val, ok := opts.Labels[key]; ok {
+			count := o.countServersByLabel(key, val)
+			if count >= maxCount {
+				o.serversMutex.Unlock()
+				return nil, fmt.Errorf("max servers for label %s=%s reached (%d)", key, val, maxCount)
+			}
+		}
 	}
 
 	port, err := o.ports.Acquire()
@@ -157,53 +243,39 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 
 	id := uuid.New().String()
 
-	var netName string
-	var subnet string
-	var gateway string
-	var isDynamic bool
-
-	if networkName != "" {
-		netName = networkName
-		isDynamic = false
-	} else {
-		netCfg, err := o.networks.Allocate(ctx, id)
-		if err != nil {
-			o.ports.Release(port)
-			o.serversMutex.Unlock()
-			return nil, err
-		}
-		netName = netCfg.NetworkName
-		subnet = netCfg.Subnet
-		gateway = netCfg.Gateway
-		isDynamic = true
+	netName := opts.NetworkName
+	if netName == "" {
+		netName = o.defaultNetwork
 	}
 
 	addr := o.cfg.Server.AdvertisedAddress
 	if addr == "" {
 		addr = "127.0.0.1"
 	}
-	s := domain.NewServer(id, game, players, addr, port)
+	s := domain.NewServer(id, opts.Game, opts.Players, addr, port)
 	s.HeartbeatTimeout = time.Duration(o.cfg.Orchestrator.HeartbeatTimeout) * time.Second
-	s.TTLSeconds = ttlSeconds
-	if ttlSeconds > 0 {
-		s.ExpiresAt = s.Created.Add(time.Duration(ttlSeconds) * time.Second)
+	s.TTLSeconds = opts.TTLSeconds
+	if opts.TTLSeconds > 0 {
+		s.ExpiresAt = s.Created.Add(time.Duration(opts.TTLSeconds) * time.Second)
 	}
-	s.WebhookURL = webhookURL
-	if webhookURL != "" {
+	s.WebhookURL = opts.WebhookURL
+	if opts.WebhookURL != "" {
 		s.OnTransition(o.webhookHook(s))
 	}
-	if labels != nil {
-		s.Labels = labels
+	if opts.Labels != nil {
+		s.Labels = opts.Labels
 	}
 	s.Network = domain.NetworkInfo{
 		NetworkName: netName,
-		Subnet:      subnet,
-		Gateway:     gateway,
-		IsDynamic:   isDynamic,
 	}
 
 	o.servers[id] = s
 	o.serversMutex.Unlock()
+
+	// Persist immediately so a crash after this point can recover the server.
+	if err := o.store.SaveServer(s); err != nil {
+		slog.Error("failed to persist server on creation", "server_id", s.ID, "error", err)
+	}
 
 	cleanup := func() {
 		o.serversMutex.Lock()
@@ -211,13 +283,7 @@ func (o *Orchestrator) CreateServer(ctx context.Context, game string, players in
 			delete(o.servers, id)
 			o.serversMutex.Unlock()
 			o.ports.Release(port)
-			if isDynamic {
-				// Use a fresh context so a cancelled request context
-				// doesn't abort Docker API calls and leak resources.
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = o.networks.Release(cleanupCtx, id)
-			}
+			_ = o.store.DeleteServer(id)
 		} else {
 			o.serversMutex.Unlock()
 		}
@@ -250,8 +316,9 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 
 	delete(o.servers, id)
 	port := s.Port
-	isDynamic := s.Network.IsDynamic
 	o.serversMutex.Unlock()
+
+	_ = o.store.DeleteServer(id)
 
 	containerName := s.ContainerName()
 	if err := o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true}); err != nil {
@@ -259,9 +326,6 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 	}
 
 	o.ports.Release(port)
-	if isDynamic {
-		return o.networks.Release(ctx, id)
-	}
 	return nil
 }
 
@@ -293,10 +357,8 @@ func (o *Orchestrator) ShutdownServer(ctx context.Context, id string) error {
 		o.serversMutex.Lock()
 		if _, exists := o.servers[s.ID]; exists {
 			o.ports.Release(s.Port)
-			if s.Network.IsDynamic {
-				_ = o.networks.Release(cleanupCtx, s.ID)
-			}
 			_ = s.Transition(domain.EventStop)
+			_ = o.store.DeleteServer(s.ID)
 		}
 		o.serversMutex.Unlock()
 	}()
@@ -312,6 +374,7 @@ func (o *Orchestrator) GC() {
 	for id, s := range o.servers {
 		if s.State() == domain.StateStopped {
 			delete(o.servers, id)
+			_ = o.store.DeleteServer(id)
 			continue
 		}
 		// Log stale heartbeats for running servers as an early warning.
@@ -393,9 +456,6 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 			o.serversMutex.Lock()
 			if _, exists := o.servers[srv.ID]; exists {
 				o.ports.Release(srv.Port)
-				if srv.Network.IsDynamic {
-					_ = o.networks.Release(stopCtx, srv.ID)
-				}
 				_ = srv.Transition(domain.EventStop)
 			}
 			o.serversMutex.Unlock()
@@ -424,15 +484,19 @@ func (o *Orchestrator) GetServer(id string) (*domain.Server, bool) {
 }
 
 func (o *Orchestrator) ListServers() []*domain.Server {
-	return o.ListServersByLabels(nil)
+	servers, _ := o.ListServersByLabels(nil, 0, 0)
+	return servers
 }
 
 // ListServersByLabels returns non-stopped servers. If labels is non-empty, only
 // servers whose Labels map contains all the requested key:value pairs are returned.
-func (o *Orchestrator) ListServersByLabels(labels map[string]string) []*domain.Server {
+// limit <= 0 means no limit; offset < 0 means no offset.
+func (o *Orchestrator) ListServersByLabels(labels map[string]string, limit, offset int) ([]*domain.Server, int) {
 	o.serversMutex.RLock()
 	defer o.serversMutex.RUnlock()
-	list := make([]*domain.Server, 0, len(o.servers))
+
+	// Collect all matching servers first to compute total.
+	var all []*domain.Server
 	for _, s := range o.servers {
 		if s.State() == domain.StateStopped {
 			continue
@@ -440,9 +504,20 @@ func (o *Orchestrator) ListServersByLabels(labels map[string]string) []*domain.S
 		if !matchLabels(s.Labels, labels) {
 			continue
 		}
-		list = append(list, s)
+		all = append(all, s)
 	}
-	return list
+	total := len(all)
+
+	// Apply pagination.
+	if offset > 0 && offset < len(all) {
+		all = all[offset:]
+	} else if offset >= len(all) {
+		all = nil
+	}
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
+	}
+	return all, total
 }
 
 // matchLabels returns true if serverLabels contains all required key:value pairs.
@@ -622,6 +697,37 @@ func webhookEventName(from, to domain.ServerState, event domain.ServerEvent) str
 	}
 }
 
+// DockerReachable returns true if the Docker daemon is responsive.
+func (o *Orchestrator) DockerReachable(ctx context.Context) bool {
+	_, err := o.docker.ContainerList(ctx, container.ListOptions{Limit: 1})
+	return err == nil
+}
+
+// BackupStore writes a consistent snapshot of the database to w.
+func (o *Orchestrator) BackupStore(w io.Writer) error {
+	return o.store.Backup(w)
+}
+
+// RestoreStore restores the database from a backup reader.
+func (o *Orchestrator) RestoreStore(r io.Reader) error {
+	return o.store.Restore(r)
+}
+
+// countServersByLabel returns the number of non-stopped servers with the given label.
+// Must be called with serversMutex held.
+func (o *Orchestrator) countServersByLabel(key, val string) int {
+	count := 0
+	for _, s := range o.servers {
+		if s.State() == domain.StateStopped {
+			continue
+		}
+		if s.Labels != nil && s.Labels[key] == val {
+			count++
+		}
+	}
+	return count
+}
+
 func (o *Orchestrator) StartWorkers() {
 	o.startOnce.Do(func() {
 		for i := 0; i < o.cfg.Orchestrator.Workers; i++ {
@@ -646,6 +752,7 @@ func (o *Orchestrator) worker(_ int) {
 		cancel()
 
 		if err != nil {
+			slog.Error("worker job failed", "server_id", s.ID, "error", err)
 			_ = s.Transition(domain.EventStop)
 			containerName := s.ContainerName()
 			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
@@ -657,12 +764,15 @@ func (o *Orchestrator) worker(_ int) {
 			if _, exists := o.servers[s.ID]; exists {
 				delete(o.servers, s.ID)
 				o.ports.Release(s.Port)
-				if s.Network.IsDynamic {
-					_ = o.networks.Release(cleanupCtx, s.ID)
-				}
 			}
 			o.serversMutex.Unlock()
+			_ = o.store.DeleteServer(s.ID)
 			cancelCleanup()
+		} else {
+			// Persist running state immediately.
+			if err := o.store.SaveServer(s); err != nil {
+				slog.Error("failed to persist server after start", "server_id", s.ID, "error", err)
+			}
 		}
 	}
 }
@@ -678,11 +788,19 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	}
 
 	if err := s.Transition(domain.EventStart); err != nil {
-		return err
+		return fmt.Errorf("transition start: %w", err)
 	}
 
 	containerName := s.ContainerName()
-	memLimit, _ := units.RAMInBytes(o.cfg.Docker.MemoryLimit)
+	resources := container.Resources{}
+	if o.cfg.Docker.CPULimit > 0 {
+		resources.NanoCPUs = int64(o.cfg.Docker.CPULimit * 1e9)
+	}
+	if o.cfg.Docker.MemoryLimit != "" {
+		if mem, err := units.RAMInBytes(o.cfg.Docker.MemoryLimit); err == nil && mem > 0 {
+			resources.Memory = mem
+		}
+	}
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
@@ -698,19 +816,19 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 				},
 			},
 		},
-		Resources: container.Resources{
-			NanoCPUs: int64(o.cfg.Docker.CPULimit * 1e9),
-			Memory:   memLimit,
-		},
+		Resources: resources,
 	}, nil, nil, containerName)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("container create: %w", err)
 	}
 
 	if err := o.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return err
+		return fmt.Errorf("container start: %w", err)
 	}
 
-	return s.Transition(domain.EventRun)
+	if err := s.Transition(domain.EventRun); err != nil {
+		return fmt.Errorf("transition run: %w", err)
+	}
+	return nil
 }

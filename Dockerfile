@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o minestrate .
 # Run stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates curl
 
 WORKDIR /app
 
@@ -25,6 +25,9 @@ COPY --from=builder /app/minestrate .
 
 # Expose HTTP port
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+	CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["./minestrate"]
 CMD ["--config", "/app/config/minestrate.yaml"]

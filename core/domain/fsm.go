@@ -215,3 +215,42 @@ func (s *Server) MarshalJSON() ([]byte, error) {
 		Labels:         s.Labels,
 	})
 }
+
+// UnmarshalJSON restores a Server from JSON, including the private state field.
+func (s *Server) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ID              string            `json:"id"`
+		Game            string            `json:"game"`
+		Players         int               `json:"players"`
+		Address         string            `json:"address"`
+		Port            int               `json:"port"`
+		Created         time.Time         `json:"created"`
+		Network         NetworkInfo       `json:"network"`
+		State           ServerState       `json:"state"`
+		LastHeartbeat   time.Time         `json:"last_heartbeat"`
+		HeartbeatStale  bool              `json:"heartbeat_stale"`
+		TTLSeconds      int               `json:"ttl_seconds"`
+		ExpiresAt       time.Time         `json:"expires_at"`
+		Expired         bool              `json:"expired"`
+		Labels          map[string]string `json:"labels"`
+		WebhookURL      string            `json:"webhook_url,omitempty"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	s.ID = aux.ID
+	s.Game = aux.Game
+	s.Players = aux.Players
+	s.Address = aux.Address
+	s.Port = aux.Port
+	s.Created = aux.Created
+	s.Network = aux.Network
+	s.state = aux.State
+	s.LastHeartbeat = aux.LastHeartbeat
+	s.TTLSeconds = aux.TTLSeconds
+	s.ExpiresAt = aux.ExpiresAt
+	s.Labels = aux.Labels
+	s.WebhookURL = aux.WebhookURL
+	return nil
+}

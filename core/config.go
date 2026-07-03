@@ -2,9 +2,7 @@ package core
 
 import (
 	"fmt"
-	"log/slog"
 	"math"
-	"net"
 	"os"
 
 	"github.com/docker/go-units"
@@ -49,8 +47,9 @@ func chiSquareUniformity(s string) float64 {
 }
 
 type Config struct {
-	Env    string `yaml:"env"`
-	Server struct {
+	Env     string `yaml:"env"`
+	DataDir string `yaml:"data_dir"`
+	Server  struct {
 		Port    int    `yaml:"port"`
 		TLSCert           string `yaml:"tls_cert"`
 		TLSKey            string `yaml:"tls_key"`
@@ -74,11 +73,12 @@ type Config struct {
 	} `yaml:"docker"`
 
 	Orchestrator struct {
-		Workers           int `yaml:"workers"`
-		MaxServers        int `yaml:"max_servers"`
-		StartTimeout      int `yaml:"start_timeout"`
-		HeartbeatTimeout  int `yaml:"heartbeat_timeout"`   // seconds, default 30
-		MaxServerLifetime int `yaml:"max_server_lifetime"` // seconds, 0=unlimited
+		Workers             int            `yaml:"workers"`
+		MaxServers          int            `yaml:"max_servers"`
+		StartTimeout        int            `yaml:"start_timeout"`
+		HeartbeatTimeout    int            `yaml:"heartbeat_timeout"`     // seconds, default 30
+		MaxServerLifetime   int            `yaml:"max_server_lifetime"`   // seconds, 0=unlimited
+		MaxServersPerLabel  map[string]int `yaml:"max_servers_per_label"` // label key → max count
 	} `yaml:"orchestrator"`
 
 	Ports struct {
@@ -87,10 +87,7 @@ type Config struct {
 	} `yaml:"ports"`
 
 	Network struct {
-		Mode           string `yaml:"mode"` // "simple" or "isolated"
-		SubnetBlock    string `yaml:"subnet_block"`
 		DefaultNetwork string `yaml:"default_network"`
-		EnableFallback bool   `yaml:"enable_fallback"`
 	} `yaml:"network"`
 }
 
@@ -139,39 +136,8 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Network.Mode == "isolated" {
-		if c.Network.SubnetBlock == "" {
-			return fmt.Errorf("network.subnet_block is required in isolated mode")
-		}
-
-		_, ipnet, err := net.ParseCIDR(c.Network.SubnetBlock)
-		if err != nil {
-			return fmt.Errorf("invalid network.subnet_block: %w", err)
-		}
-
-		ones, bits := ipnet.Mask.Size()
-		if bits != 32 {
-			return fmt.Errorf("network.subnet_block must be an IPv4 CIDR, got IPv%d", bits)
-		}
-		if ones > 28 {
-			return fmt.Errorf("network.subnet_block must be at least a /28, got /%d", ones)
-		}
-
-		numSubnets := 1 << (28 - ones)
-		if c.Orchestrator.MaxServers > numSubnets {
-			slog.Warn("orchestrator.max_servers exceeds available /28 subnets",
-				"max_servers", c.Orchestrator.MaxServers,
-				"subnet_block", c.Network.SubnetBlock,
-				"available_subnets", numSubnets)
-		}
-	}
-
-	if c.Network.Mode == "simple" && c.Network.DefaultNetwork == "" {
-		return fmt.Errorf("network.default_network is required in simple mode")
-	}
-
-	if c.Network.Mode == "isolated" && c.Network.EnableFallback && c.Network.DefaultNetwork == "" {
-		return fmt.Errorf("network.default_network is required when fallback is enabled in isolated mode")
+	if c.Network.DefaultNetwork == "" {
+		return fmt.Errorf("network.default_network is required")
 	}
 
 	return nil
