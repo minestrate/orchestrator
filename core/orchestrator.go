@@ -792,7 +792,15 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 	}
 
 	containerName := s.ContainerName()
-	memLimit, _ := units.RAMInBytes(o.cfg.Docker.MemoryLimit)
+	resources := container.Resources{}
+	if o.cfg.Docker.CPULimit > 0 {
+		resources.NanoCPUs = int64(o.cfg.Docker.CPULimit * 1e9)
+	}
+	if o.cfg.Docker.MemoryLimit != "" {
+		if mem, err := units.RAMInBytes(o.cfg.Docker.MemoryLimit); err == nil && mem > 0 {
+			resources.Memory = mem
+		}
+	}
 	resp, err := o.docker.ContainerCreate(ctx, &container.Config{
 		Image: o.cfg.Docker.Image,
 		Labels: map[string]string{
@@ -808,10 +816,7 @@ func (o *Orchestrator) processJob(ctx context.Context, s *domain.Server) error {
 				},
 			},
 		},
-		Resources: container.Resources{
-			NanoCPUs: int64(o.cfg.Docker.CPULimit * 1e9),
-			Memory:   memLimit,
-		},
+		Resources: resources,
 	}, nil, nil, containerName)
 
 	if err != nil {
