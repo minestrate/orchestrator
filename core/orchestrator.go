@@ -200,23 +200,6 @@ func (o *Orchestrator) cleanupOrphans() {
 	}
 }
 
-func (o *Orchestrator) CreateNetwork(ctx context.Context, name string, subnet string) error {
-	opts := dockernetwork.CreateOptions{
-		Driver: "bridge",
-	}
-	if subnet != "" {
-		opts.IPAM = &dockernetwork.IPAM{
-			Config: []dockernetwork.IPAMConfig{
-				{
-					Subnet: subnet,
-				},
-			},
-		}
-	}
-	_, err := o.docker.NetworkCreate(ctx, name, opts)
-	return err
-}
-
 func (o *Orchestrator) CreateServer(ctx context.Context, opts CreateServerOptions) (*domain.Server, error) {
 	o.serversMutex.Lock()
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
