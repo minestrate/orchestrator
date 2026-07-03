@@ -51,6 +51,29 @@ func TestCreateServer(t *testing.T) {
 		}
 	})
 
+	t.Run("ValidRequestWithWebhook", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "skywars", Players: 8, WebhookURL: "http://example.com/hook"}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body))
+		w := httptest.NewRecorder()
+
+		h.CreateServer(w, req)
+
+		if w.Code != http.StatusAccepted {
+			t.Errorf("Expected status 202, got %d", w.Code)
+		}
+
+		var resp ServerResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		// Verify webhook URL was stored.
+		s, _ := h.orchestrator.GetServer(resp.ID)
+		if s.WebhookURL != "http://example.com/hook" {
+			t.Errorf("Expected webhook URL to be stored, got %q", s.WebhookURL)
+		}
+	})
+
 	t.Run("ValidRequestWithCustomNetwork", func(t *testing.T) {
 		reqBody := CreateServerRequest{Game: "skywars", Players: 8, NetworkName: "custom-net"}
 		body, _ := json.Marshal(reqBody)
@@ -106,6 +129,68 @@ func TestCreateNetwork(t *testing.T) {
 			t.Errorf("Expected status 400, got %d", w.Code)
 		}
 	})
+}
+
+func TestListServersWithLabels(t *testing.T) {
+	h := setupTestHandler()
+
+	// Create servers with different labels.
+	body1, _ := json.Marshal(CreateServerRequest{
+		Game: "bedwars", Players: 4,
+		Labels: map[string]string{"mode": "bedwars", "region": "eu"},
+	})
+	w1 := httptest.NewRecorder()
+	h.CreateServer(w1, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body1)))
+
+	body2, _ := json.Marshal(CreateServerRequest{
+		Game: "skywars", Players: 8,
+		Labels: map[string]string{"mode": "skywars", "region": "us"},
+	})
+	w2 := httptest.NewRecorder()
+	h.CreateServer(w2, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body2)))
+
+	// Filter by mode=bedwars.
+	req := httptest.NewRequest(http.MethodGet, "/servers?label=mode:bedwars", nil)
+	w := httptest.NewRecorder()
+	h.ListServers(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	var resp []ServerResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp) != 1 {
+		t.Errorf("Expected 1 server with label mode=bedwars, got %d", len(resp))
+	}
+	if len(resp) > 0 && resp[0].Game != "bedwars" {
+		t.Errorf("Expected bedwars, got %s", resp[0].Game)
+	}
+
+	// Filter by region=us.
+	req2 := httptest.NewRequest(http.MethodGet, "/servers?label=region:us", nil)
+	w = httptest.NewRecorder()
+	h.ListServers(w, req2)
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp) != 1 {
+		t.Errorf("Expected 1 server with label region=us, got %d", len(resp))
+	}
+
+	// Multi-label filter.
+	req3 := httptest.NewRequest(http.MethodGet, "/servers?label=mode:bedwars&label=region:eu", nil)
+	w = httptest.NewRecorder()
+	h.ListServers(w, req3)
+
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp) != 1 {
+		t.Errorf("Expected 1 server matching both labels, got %d", len(resp))
+	}
 }
 
 func TestListServers(t *testing.T) {
@@ -273,6 +358,187 @@ func TestDeleteServer(t *testing.T) {
 
 		if w.Code != http.StatusConflict {
 			t.Errorf("Expected status 409, got %d", w.Code)
+		}
+	})
+}
+
+func TestGetServerHealth(t *testing.T) {
+	h := setupTestHandler()
+
+	// Create a server and advance to running
+	reqBody := CreateServerRequest{Game: "health-test", Players: 4}
+	body, _ := json.Marshal(reqBody)
+	w := httptest.NewRecorder()
+	h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
+
+	var created ServerResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	s, _ := h.orchestrator.GetServer(created.ID)
+	_ = s.Transition(domain.EventStart)
+	_ = s.Transition(domain.EventRun)
+
+	t.Run("HealthyServer", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/servers/"+created.ID+"/health", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", created.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.GetServerHealth(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+
+		var resp orchestrator.ServerHealth
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.Healthy {
+			t.Error("Expected healthy=true for running server with mock Docker")
+		}
+		if resp.State != string(domain.StateRunning) {
+			t.Errorf("Expected state=running, got %s", resp.State)
+		}
+		if !resp.ContainerRunning {
+			t.Error("Expected container_running=true with mock Docker")
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/servers/nonexistent/health", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.GetServerHealth(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestRecordHeartbeat(t *testing.T) {
+	h := setupTestHandler()
+
+	// Create a server
+	reqBody := CreateServerRequest{Game: "hb-test", Players: 2}
+	body, _ := json.Marshal(reqBody)
+	w := httptest.NewRecorder()
+	h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
+
+	var created ServerResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/servers/"+created.ID+"/heartbeat", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", created.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.RecordHeartbeat(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d", w.Code)
+		}
+
+		// Verify heartbeat was recorded
+		s, _ := h.orchestrator.GetServer(created.ID)
+		if s.HeartbeatAge() <= 0 {
+			t.Error("Expected heartbeat age > 0 after recording")
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/servers/nonexistent/heartbeat", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.RecordHeartbeat(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestExtendServer(t *testing.T) {
+	h := setupTestHandler()
+
+	t.Run("ExtendWithTTL", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "extend-test", Players: 2, TTLSeconds: 60}
+		body, _ := json.Marshal(reqBody)
+		w := httptest.NewRecorder()
+		h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
+
+		var created ServerResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/servers/"+created.ID+"/extend", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", created.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.ExtendServer(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d", w.Code)
+		}
+
+		s, _ := h.orchestrator.GetServer(created.ID)
+		if s.IsExpired() {
+			t.Error("server should not be expired after extend")
+		}
+	})
+
+	t.Run("ExtendWithoutTTL", func(t *testing.T) {
+		reqBody := CreateServerRequest{Game: "no-ttl", Players: 2}
+		body, _ := json.Marshal(reqBody)
+		w := httptest.NewRecorder()
+		h.CreateServer(w, httptest.NewRequest(http.MethodPost, "/servers", bytes.NewBuffer(body)))
+
+		var created ServerResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/servers/"+created.ID+"/extend", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", created.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w = httptest.NewRecorder()
+		h.ExtendServer(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400 for server without TTL, got %d", w.Code)
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/servers/nonexistent/extend", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "nonexistent")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w := httptest.NewRecorder()
+		h.ExtendServer(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", w.Code)
 		}
 	})
 }
