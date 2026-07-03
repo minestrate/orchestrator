@@ -74,9 +74,11 @@ type Config struct {
 	} `yaml:"docker"`
 
 	Orchestrator struct {
-		Workers      int `yaml:"workers"`
-		MaxServers   int `yaml:"max_servers"`
-		StartTimeout int `yaml:"start_timeout"`
+		Workers           int `yaml:"workers"`
+		MaxServers        int `yaml:"max_servers"`
+		StartTimeout      int `yaml:"start_timeout"`
+		HeartbeatTimeout  int `yaml:"heartbeat_timeout"`   // seconds, default 30
+		MaxServerLifetime int `yaml:"max_server_lifetime"` // seconds, 0=unlimited
 	} `yaml:"orchestrator"`
 
 	Ports struct {
