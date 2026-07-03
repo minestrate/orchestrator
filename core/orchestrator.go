@@ -255,7 +255,7 @@ func (o *Orchestrator) StopServer(ctx context.Context, id string) error {
 
 	containerName := s.ContainerName()
 	if err := o.docker.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true}); err != nil {
-		slog.Error("failed to remove container in StopServer", "container", containerName, "error", err)
+		slog.Error("failed to remove container in StopServer", "container", containerName, "server_id", s.ID, "error", err)
 	}
 
 	o.ports.Release(port)
@@ -382,7 +382,7 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 			_ = srv.Transition(domain.EventDrain)
 
 			containerName := srv.ContainerName()
-			fmt.Printf("Stopping container: %s\n", containerName)
+			slog.Info("stopping container", "container", containerName, "server_id", srv.ID)
 
 			// Per-container timeout so one stuck container doesn't cancel all others.
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -410,9 +410,9 @@ func (o *Orchestrator) ShutdownAll(ctx context.Context) {
 
 	select {
 	case <-done:
-		fmt.Println("All servers shut down gracefully.")
+		slog.Info("all servers shut down gracefully")
 	case <-ctx.Done():
-		fmt.Println("Shutdown timed out, some containers may still be running.")
+		slog.Warn("shutdown timed out, some containers may still be running")
 	}
 }
 
@@ -650,7 +650,7 @@ func (o *Orchestrator) worker(_ int) {
 			containerName := s.ContainerName()
 			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := o.docker.ContainerRemove(cleanupCtx, containerName, container.RemoveOptions{Force: true}); err != nil {
-				slog.Error("failed to remove container in worker", "container", containerName, "error", err)
+				slog.Error("failed to remove container in worker", "container", containerName, "server_id", s.ID, "error", err)
 			}
 
 			o.serversMutex.Lock()
