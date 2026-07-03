@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -221,6 +222,17 @@ func (o *Orchestrator) CreateServer(ctx context.Context, opts CreateServerOption
 	if len(o.servers) >= o.cfg.Orchestrator.MaxServers {
 		o.serversMutex.Unlock()
 		return nil, ErrMaxServersReached
+	}
+
+	// Check per-label limits.
+	for key, maxCount := range o.cfg.Orchestrator.MaxServersPerLabel {
+		if val, ok := opts.Labels[key]; ok {
+			count := o.countServersByLabel(key, val)
+			if count >= maxCount {
+				o.serversMutex.Unlock()
+				return nil, fmt.Errorf("max servers for label %s=%s reached (%d)", key, val, maxCount)
+			}
+		}
 	}
 
 	port, err := o.ports.Acquire()
@@ -472,15 +484,19 @@ func (o *Orchestrator) GetServer(id string) (*domain.Server, bool) {
 }
 
 func (o *Orchestrator) ListServers() []*domain.Server {
-	return o.ListServersByLabels(nil)
+	servers, _ := o.ListServersByLabels(nil, 0, 0)
+	return servers
 }
 
 // ListServersByLabels returns non-stopped servers. If labels is non-empty, only
 // servers whose Labels map contains all the requested key:value pairs are returned.
-func (o *Orchestrator) ListServersByLabels(labels map[string]string) []*domain.Server {
+// limit <= 0 means no limit; offset < 0 means no offset.
+func (o *Orchestrator) ListServersByLabels(labels map[string]string, limit, offset int) ([]*domain.Server, int) {
 	o.serversMutex.RLock()
 	defer o.serversMutex.RUnlock()
-	list := make([]*domain.Server, 0, len(o.servers))
+
+	// Collect all matching servers first to compute total.
+	var all []*domain.Server
 	for _, s := range o.servers {
 		if s.State() == domain.StateStopped {
 			continue
@@ -488,9 +504,20 @@ func (o *Orchestrator) ListServersByLabels(labels map[string]string) []*domain.S
 		if !matchLabels(s.Labels, labels) {
 			continue
 		}
-		list = append(list, s)
+		all = append(all, s)
 	}
-	return list
+	total := len(all)
+
+	// Apply pagination.
+	if offset > 0 && offset < len(all) {
+		all = all[offset:]
+	} else if offset >= len(all) {
+		all = nil
+	}
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
+	}
+	return all, total
 }
 
 // matchLabels returns true if serverLabels contains all required key:value pairs.
@@ -674,6 +701,31 @@ func webhookEventName(from, to domain.ServerState, event domain.ServerEvent) str
 func (o *Orchestrator) DockerReachable(ctx context.Context) bool {
 	_, err := o.docker.ContainerList(ctx, container.ListOptions{Limit: 1})
 	return err == nil
+}
+
+// BackupStore writes a consistent snapshot of the database to w.
+func (o *Orchestrator) BackupStore(w io.Writer) error {
+	return o.store.Backup(w)
+}
+
+// RestoreStore restores the database from a backup reader.
+func (o *Orchestrator) RestoreStore(r io.Reader) error {
+	return o.store.Restore(r)
+}
+
+// countServersByLabel returns the number of non-stopped servers with the given label.
+// Must be called with serversMutex held.
+func (o *Orchestrator) countServersByLabel(key, val string) int {
+	count := 0
+	for _, s := range o.servers {
+		if s.State() == domain.StateStopped {
+			continue
+		}
+		if s.Labels != nil && s.Labels[key] == val {
+			count++
+		}
+	}
+	return count
 }
 
 func (o *Orchestrator) StartWorkers() {

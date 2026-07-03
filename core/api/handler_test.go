@@ -157,10 +157,11 @@ func TestListServersWithLabels(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
-	var resp []ServerResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var listResp ServerListResponse
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
+	resp := listResp.Servers
 	if len(resp) != 1 {
 		t.Errorf("Expected 1 server with label mode=bedwars, got %d", len(resp))
 	}
@@ -173,11 +174,11 @@ func TestListServersWithLabels(t *testing.T) {
 	w = httptest.NewRecorder()
 	h.ListServers(w, req2)
 
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp) != 1 {
-		t.Errorf("Expected 1 server with label region=us, got %d", len(resp))
+	if len(listResp.Servers) != 1 {
+		t.Errorf("Expected 1 server with label region=us, got %d", len(listResp.Servers))
 	}
 
 	// Multi-label filter.
@@ -185,11 +186,11 @@ func TestListServersWithLabels(t *testing.T) {
 	w = httptest.NewRecorder()
 	h.ListServers(w, req3)
 
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp) != 1 {
-		t.Errorf("Expected 1 server matching both labels, got %d", len(resp))
+	if len(listResp.Servers) != 1 {
+		t.Errorf("Expected 1 server matching both labels, got %d", len(listResp.Servers))
 	}
 }
 
@@ -225,15 +226,15 @@ func TestListServers(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var resp []ServerResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	var listResp ServerListResponse
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
 		t.Fatal(err)
 	}
 	// Should only have 1 server (the non-stopped one)
-	if len(resp) != 1 {
-		t.Errorf("Expected 1 server, got %d", len(resp))
+	if len(listResp.Servers) != 1 {
+		t.Errorf("Expected 1 server, got %d", len(listResp.Servers))
 	}
-	if resp[0].Created.IsZero() {
+	if listResp.Servers[0].Created.IsZero() {
 		t.Error("Expected Created field to be set")
 	}
 }

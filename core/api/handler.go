@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -116,10 +119,31 @@ func (h *Handler) CreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListServers(w http.ResponseWriter, r *http.Request) {
 	labelFilters := parseLabelFilters(r)
-	servers := h.orchestrator.ListServersByLabels(labelFilters)
+	limit, offset := parsePagination(r)
+	servers, total := h.orchestrator.ListServersByLabels(labelFilters, limit, offset)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(ToServerListResponse(servers))
+	_ = json.NewEncoder(w).Encode(ServerListResponse{
+		Servers: ToServerListResponse(servers),
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	})
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit = 50 // default
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	return
 }
 
 // parseLabelFilters extracts label=key:value query params and returns them as a map.
@@ -224,4 +248,25 @@ func (h *Handler) ExtendServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AdminBackup streams a consistent snapshot of the database.
+func (h *Handler) AdminBackup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=minestrate-%s.db", time.Now().UTC().Format("20060102-150405")))
+	if err := h.orchestrator.BackupStore(w); err != nil {
+		http.Error(w, fmt.Sprintf("backup failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+// AdminRestore restores the database from an uploaded backup.
+func (h *Handler) AdminRestore(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	if err := h.orchestrator.RestoreStore(r.Body); err != nil {
+		http.Error(w, fmt.Sprintf("restore failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
 }

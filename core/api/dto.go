@@ -55,3 +55,11 @@ func ToServerListResponse(servers []*domain.Server) []ServerResponse {
 	}
 	return resp
 }
+
+// ServerListResponse wraps a paginated server list.
+type ServerListResponse struct {
+	Servers []ServerResponse `json:"servers"`
+	Total   int              `json:"total"`
+	Limit   int              `json:"limit"`
+	Offset  int              `json:"offset"`
+}

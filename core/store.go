@@ -3,7 +3,9 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 
 	"github.com/mitsuakki/minestrate/core/domain"
 	bolt "go.etcd.io/bbolt"
@@ -89,7 +91,65 @@ func (s *Store) DeleteServer(id string) error {
 	})
 }
 
+// Backup writes a consistent snapshot of the database to w.
+func (s *Store) Backup(w io.Writer) error {
+	if s == nil {
+		return fmt.Errorf("store is nil")
+	}
+	return s.db.View(func(tx *bolt.Tx) error {
+		_, err := tx.WriteTo(w)
+		return err
+	})
+}
+
+// Restore replaces the current database with a backup from r.
+// WARNING: this closes the current database and reopens from the backup data.
+// The store must be re-opened after this call.
+func (s *Store) Restore(r io.Reader) error {
+	if s == nil {
+		return fmt.Errorf("store is nil")
+	}
+	dbPath := s.db.Path()
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("close db before restore: %w", err)
+	}
+
+	// Write the backup into a new bolt DB file.
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read backup: %w", err)
+	}
+
+	db, err := bolt.Open(dbPath, 0600, nil)
+	if err != nil {
+		return fmt.Errorf("reopen db: %w", err)
+	}
+	s.db = db
+
+	// Write the raw backup data — bolt can consume its own snapshot.
+	// We reopen with a fresh file and let bolt load the backup.
+	// Actually, bolt tx.WriteTo produces a bolt DB file that can be opened directly.
+	// So we close, write the file, and reopen.
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close db for restore write: %w", err)
+	}
+	if err := os.WriteFile(dbPath, data, 0600); err != nil {
+		return fmt.Errorf("write backup file: %w", err)
+	}
+
+	// Reopen so the store is usable again.
+	db, err = bolt.Open(dbPath, 0600, nil)
+	if err != nil {
+		return fmt.Errorf("reopen after restore: %w", err)
+	}
+	s.db = db
+	return nil
+}
+
 // Close closes the underlying database.
 func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
 	return s.db.Close()
 }

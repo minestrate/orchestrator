@@ -109,6 +109,14 @@ func main() {
 	r.Get("/health", h.HealthCheck)
 	r.Get("/metrics", api.MetricsHandler)
 
+	// Redirect legacy paths to /v1 equivalents.
+	r.Get("/servers", redirectV1)
+	r.Get("/servers/*", redirectV1)
+	r.Post("/servers", redirectV1)
+	r.Post("/servers/*", redirectV1)
+	r.Delete("/servers/*", redirectV1)
+	r.Post("/networks", redirectV1)
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(api.Auth(cfg.Auth.JWTSecret))
@@ -122,6 +130,10 @@ func main() {
 			r.Delete("/servers/{id}", h.DeleteServer)
 			r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
 			r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
+
+			// Admin endpoints.
+			r.With(api.RequireScope("admin")).Get("/admin/backup", h.AdminBackup)
+			r.With(api.RequireScope("admin")).Post("/admin/restore", h.AdminRestore)
 		})
 	})
 
@@ -161,6 +173,11 @@ func main() {
 
 	o.ShutdownAll(shutdownCtx)
 	slog.Info("Exit.")
+}
+
+// redirectV1 redirects legacy paths to their /v1 equivalents.
+func redirectV1(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/v1"+r.URL.Path, http.StatusMovedPermanently)
 }
 
 // slogLevelFromEnv reads LOG_LEVEL and returns the corresponding slog.Level.
