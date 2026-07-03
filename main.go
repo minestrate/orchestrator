@@ -118,6 +118,9 @@ func main() {
 
 		r.Get("/servers", h.ListServers)
 		r.Get("/servers/{id}", h.GetServer)
+		r.Get("/servers/{id}/health", h.GetServerHealth)
+		r.Post("/servers/{id}/heartbeat", h.RecordHeartbeat)
+		r.Post("/servers/{id}/extend", h.ExtendServer)
 		r.Delete("/servers/{id}", h.DeleteServer)
 		r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
 		r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
