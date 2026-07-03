@@ -49,6 +49,11 @@ audit: test
 test:
 	go test -v -race -buildvcs ./...
 
+## test/integration: run integration tests (requires Docker)
+.PHONY: test/integration
+test/integration:
+	go test -tags=integration -v ./...
+
 ## test/cover: run all tests and display coverage in browser
 .PHONY: test/cover
 test/cover:
