@@ -47,7 +47,6 @@ func chiSquareUniformity(s string) float64 {
 }
 
 type Config struct {
-	Env     string `yaml:"env"`
 	DataDir string `yaml:"data_dir"`
 	Server  struct {
 		Port    int    `yaml:"port"`
