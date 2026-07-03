@@ -33,7 +33,7 @@ func main() {
 	}
 
 	if *version {
-		fmt.Fprintf(os.Stdout, "Version: dev\n")
+		fmt.Fprintf(os.Stdout, "Version: 1\n")
 		return
 	}
 
