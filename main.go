@@ -109,18 +109,20 @@ func main() {
 	r.Get("/health", h.HealthCheck)
 	r.Get("/metrics", api.MetricsHandler)
 
-	r.Group(func(r chi.Router) {
-		r.Use(api.Auth(cfg.Auth.JWTSecret))
-		r.Use(rateLimiter.Middleware)
+	r.Route("/v1", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(api.Auth(cfg.Auth.JWTSecret))
+			r.Use(rateLimiter.Middleware)
 
-		r.Get("/servers", h.ListServers)
-		r.Get("/servers/{id}", h.GetServer)
-		r.Get("/servers/{id}/health", h.GetServerHealth)
-		r.Post("/servers/{id}/heartbeat", h.RecordHeartbeat)
-		r.Post("/servers/{id}/extend", h.ExtendServer)
-		r.Delete("/servers/{id}", h.DeleteServer)
-		r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
-		r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
+			r.Get("/servers", h.ListServers)
+			r.Get("/servers/{id}", h.GetServer)
+			r.Get("/servers/{id}/health", h.GetServerHealth)
+			r.Post("/servers/{id}/heartbeat", h.RecordHeartbeat)
+			r.Post("/servers/{id}/extend", h.ExtendServer)
+			r.Delete("/servers/{id}", h.DeleteServer)
+			r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
+			r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
+		})
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
