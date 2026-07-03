@@ -1,6 +1,6 @@
 //go:build integration
 
-package core_test
+package core
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/client"
-	orchestrator "github.com/mitsuakki/minestrate/core"
 )
 
 func TestDockerIntegration(t *testing.T) {
@@ -23,8 +22,8 @@ func TestDockerIntegration(t *testing.T) {
 		t.Skipf("Docker daemon not reachable, skipping integration test: %v", err)
 	}
 
-	cfg := &orchestrator.Config{}
-	cfg.Docker.Image = "alpine:latest"
+	cfg := &Config{}
+	cfg.Docker.Image = "nginx:alpine"
 	cfg.Ports.RangeStart = 30000
 	cfg.Ports.RangeEnd = 30010
 	cfg.Orchestrator.MaxServers = 5
@@ -32,14 +31,14 @@ func TestDockerIntegration(t *testing.T) {
 	cfg.Orchestrator.StartTimeout = 30
 	cfg.Network.DefaultNetwork = "minestrate-test"
 
-	o, err := orchestrator.NewOrchestrator(cfg, cli)
+	o, err := NewOrchestrator(cfg, cli)
 	if err != nil {
 		t.Fatalf("failed to create orchestrator: %v", err)
 	}
 	o.StartWorkers()
 
 	// Create a server.
-	s, err := o.CreateServer(context.Background(), orchestrator.CreateServerOptions{
+	s, err := o.CreateServer(context.Background(), CreateServerOptions{
 		Game:    "test",
 		Players: 4,
 	})
@@ -49,7 +48,7 @@ func TestDockerIntegration(t *testing.T) {
 	t.Logf("created server: %s", s.ID)
 
 	// Wait for the container to start.
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Verify container exists.
 	insp, err := cli.ContainerInspect(context.Background(), s.ContainerName())

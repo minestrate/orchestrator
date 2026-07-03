@@ -43,7 +43,7 @@ jobs:
         run: go mod download
 
       - name: Pull test image
-        run: docker pull alpine:latest
+        run: docker pull nginx:alpine
 
       - name: Run integration tests
         run: go test -tags=integration -v ./...
