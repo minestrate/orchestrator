@@ -15,10 +15,8 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
 	orchestrator "github.com/mitsuakki/minestrate/core"
 	"github.com/mitsuakki/minestrate/core/api"
-	"github.com/mitsuakki/minestrate/core/dockerclient"
 )
 
 func main() {
@@ -49,50 +47,21 @@ func main() {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 	slog.SetDefault(slog.New(handler))
 
-	if cfg.Env == "dev" {
-		claims := &api.Claims{
-			Scope: []string{"server:create"},
-			RegisteredClaims: jwt.RegisteredClaims{
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
-				IssuedAt:  jwt.NewNumericDate(time.Now()),
-				NotBefore: jwt.NewNumericDate(time.Now()),
-				Issuer:    "minestrate-dev",
-				Subject:   "admin",
-			},
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		ss, err := token.SignedString([]byte(cfg.Auth.JWTSecret))
-		if err != nil {
-			slog.Error("failed to generate dev token", "error", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "Dev JWT: %s\n", ss)
-		}
-	} else if cfg.Env == "prod" {
-		if cfg.Auth.JWTSecret == "this-is-a-very-long-secret-key-32-bytes" {
-			slog.Error("insecure default JWT secret detected in production")
-			os.Exit(1)
-		}
+	if cfg.Auth.JWTSecret == "this-is-a-very-long-secret-key-32-bytes" {
+		slog.Warn("using default JWT secret — generate a strong one: go run ./cmd/jwtgen/ --secret <your-secret>")
 	}
 
 	r := chi.NewRouter()
 	r.Use(requestLogger)
 
-	var dockerClient dockerclient.Client
-	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
-		dockerClient = &dockerclient.MockClient{}
-	} else {
-		opts := []client.Opt{client.WithAPIVersionNegotiation()}
-		if cfg.Docker.Socket != "" {
-			opts = append(opts, client.WithHost(cfg.Docker.Socket))
-		}
-
-		var err error
-		dockerClient, err = client.NewClientWithOpts(opts...)
-		if err != nil {
-			slog.Error("failed to create docker client", "error", err)
-			os.Exit(1)
-		}
+	opts := []client.Opt{client.WithAPIVersionNegotiation()}
+	if cfg.Docker.Socket != "" {
+		opts = append(opts, client.WithHost(cfg.Docker.Socket))
+	}
+	dockerClient, err := client.NewClientWithOpts(opts...)
+	if err != nil {
+		slog.Error("failed to create docker client", "error", err)
+		os.Exit(1)
 	}
 
 	o, err := orchestrator.NewOrchestrator(cfg, dockerClient)

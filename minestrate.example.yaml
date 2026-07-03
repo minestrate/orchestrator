@@ -1,5 +1,4 @@
 # minestrate.example.yaml — copy to minestrate.yaml and edit
-env: dev     # dev | prod  — dev prints a JWT on startup and defaults to mock Docker
 data_dir: "" # path to persistent state directory, e.g. /var/lib/minestrate. Empty = no persistence.
 
 server:
