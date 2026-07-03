@@ -8,4 +8,5 @@ var (
 	ErrServerNotFound    = errors.New("server not found")
 	ErrServerNotRunning  = errors.New("server not in running state")
 	ErrNoPortsAvailable  = errors.New("no ports available")
+	ErrServerNoTTL       = errors.New("server has no TTL configured")
 )

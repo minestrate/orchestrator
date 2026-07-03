@@ -65,16 +65,22 @@ type NetworkInfo struct {
 }
 
 type Server struct {
-	mu      sync.Mutex
-	ID      string      `json:"id"`
-	Game    string      `json:"game"`
-	Players int         `json:"players"`
-	Address string      `json:"address"`
-	Port    int         `json:"port"`
-	Created time.Time   `json:"created"`
-	Network NetworkInfo `json:"network"`
-	state   ServerState
-	hooks   []TransitionHook
+	mu               sync.Mutex
+	ID               string        `json:"id"`
+	Game             string        `json:"game"`
+	Players          int           `json:"players"`
+	Address          string        `json:"address"`
+	Port             int           `json:"port"`
+	Created          time.Time     `json:"created"`
+	Network          NetworkInfo   `json:"network"`
+	state            ServerState
+	hooks            []TransitionHook
+	LastHeartbeat    time.Time     `json:"last_heartbeat"`
+	HeartbeatTimeout time.Duration `json:"-"`
+	TTLSeconds       int           `json:"ttl_seconds"`
+	ExpiresAt        time.Time     `json:"expires_at"`
+	WebhookURL       string            `json:"webhook_url,omitempty"`
+	Labels           map[string]string `json:"labels"`
 }
 
 func NewServer(id, game string, players int, address string, port int) *Server {
@@ -130,27 +136,82 @@ func (s *Server) ContainerName() string {
 	return fmt.Sprintf("minestrate-%s-%s", s.Game, id)
 }
 
+func (s *Server) RecordHeartbeat() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LastHeartbeat = time.Now()
+}
+
+func (s *Server) HeartbeatAge() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LastHeartbeat.IsZero() {
+		return 0
+	}
+	return time.Since(s.LastHeartbeat)
+}
+
+func (s *Server) IsHeartbeatStale() bool {
+	age := s.HeartbeatAge()
+	if age == 0 {
+		return false // never received a heartbeat
+	}
+	return age > s.HeartbeatTimeout
+}
+
+// ExtendTTL resets the expiration time from now + TTLSeconds.
+// Does nothing if TTLSeconds is 0 (no TTL set).
+func (s *Server) ExtendTTL() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.TTLSeconds > 0 {
+		s.ExpiresAt = time.Now().Add(time.Duration(s.TTLSeconds) * time.Second)
+	}
+}
+
+// IsExpired returns true if the server has a TTL and it has passed.
+func (s *Server) IsExpired() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.TTLSeconds == 0 || s.ExpiresAt.IsZero() {
+		return false
+	}
+	return time.Now().After(s.ExpiresAt)
+}
+
 func (s *Server) MarshalJSON() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	return json.Marshal(struct {
-		ID      string      `json:"id"`
-		Game    string      `json:"game"`
-		Players int         `json:"players"`
-		Address string      `json:"address"`
-		Port    int         `json:"port"`
-		Created time.Time   `json:"created"`
-		Network NetworkInfo `json:"network"`
-		State   ServerState `json:"state"`
+		ID             string      `json:"id"`
+		Game           string      `json:"game"`
+		Players        int         `json:"players"`
+		Address        string      `json:"address"`
+		Port           int         `json:"port"`
+		Created        time.Time   `json:"created"`
+		Network        NetworkInfo `json:"network"`
+		State          ServerState `json:"state"`
+		LastHeartbeat  time.Time   `json:"last_heartbeat"`
+		HeartbeatStale bool        `json:"heartbeat_stale"`
+		TTLSeconds     int               `json:"ttl_seconds"`
+		ExpiresAt      time.Time         `json:"expires_at"`
+		Expired        bool              `json:"expired"`
+		Labels         map[string]string `json:"labels"`
 	}{
-		ID:      s.ID,
-		Game:    s.Game,
-		Players: s.Players,
-		Address: s.Address,
-		Port:    s.Port,
-		Created: s.Created,
-		Network: s.Network,
-		State:   s.state,
+		ID:             s.ID,
+		Game:           s.Game,
+		Players:        s.Players,
+		Address:        s.Address,
+		Port:           s.Port,
+		Created:        s.Created,
+		Network:        s.Network,
+		State:          s.state,
+		LastHeartbeat:  s.LastHeartbeat,
+		HeartbeatStale: s.LastHeartbeat.IsZero() || time.Since(s.LastHeartbeat) > s.HeartbeatTimeout,
+		TTLSeconds:     s.TTLSeconds,
+		ExpiresAt:      s.ExpiresAt,
+		Expired:        s.TTLSeconds > 0 && !s.ExpiresAt.IsZero() && time.Now().After(s.ExpiresAt),
+		Labels:         s.Labels,
 	})
 }

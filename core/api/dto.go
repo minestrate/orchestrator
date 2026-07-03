@@ -7,9 +7,12 @@ import (
 )
 
 type CreateServerRequest struct {
-	Game        string `json:"game"`
-	Players     int    `json:"players"`
-	NetworkName string `json:"network_name,omitempty"`
+	Game        string            `json:"game"`
+	Players     int               `json:"players"`
+	NetworkName string            `json:"network_name,omitempty"`
+	TTLSeconds  int               `json:"ttl_seconds,omitempty"`
+	WebhookURL  string            `json:"webhook_url,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type CreateNetworkRequest struct {
@@ -25,9 +28,14 @@ type ServerResponse struct {
 	Port    int                `json:"port"`
 	Created time.Time          `json:"created"`
 	State   domain.ServerState `json:"state"`
+	Labels  map[string]string  `json:"labels"`
 }
 
 func ToServerResponse(s *domain.Server) ServerResponse {
+	labels := s.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	return ServerResponse{
 		ID:      s.ID,
 		Game:    s.Game,
@@ -36,6 +44,7 @@ func ToServerResponse(s *domain.Server) ServerResponse {
 		Port:    s.Port,
 		Created: s.Created,
 		State:   s.State(),
+		Labels:  labels,
 	}
 }
 

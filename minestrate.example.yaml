@@ -23,7 +23,9 @@ docker:
 orchestrator:
   workers: 4
   max_servers: 100
-  start_timeout: 30  # seconds before container start is considered failed
+  start_timeout: 30     # seconds before container start is considered failed
+  heartbeat_timeout: 30   # seconds without heartbeat before server marked unhealthy
+  max_server_lifetime: 0   # seconds, 0=unlimited. hard cap — cannot be extended past this
 
 ports:
   range_start: 19132

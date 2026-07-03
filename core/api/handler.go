@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	orchestrator "github.com/mitsuakki/minestrate/core"
 	"github.com/mitsuakki/minestrate/core/domain"
 )
@@ -15,8 +16,15 @@ type Handler struct {
 	orchestrator *orchestrator.Orchestrator
 }
 
+var metricsHandler = promhttp.Handler()
+
 func NewHandler(o *orchestrator.Orchestrator) *Handler {
 	return &Handler{orchestrator: o}
+}
+
+// MetricsHandler exposes Prometheus metrics. No auth — intended for internal scraping.
+func MetricsHandler(w http.ResponseWriter, r *http.Request) {
+	metricsHandler.ServeHTTP(w, r)
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +62,7 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players, req.NetworkName)
+	s, err := h.orchestrator.CreateServer(r.Context(), req.Game, req.Players, req.NetworkName, req.TTLSeconds, req.WebhookURL, req.Labels)
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrMaxServersReached) ||
 			errors.Is(err, orchestrator.ErrNoPortsAvailable) ||
@@ -98,10 +106,30 @@ func (h *Handler) CreateNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListServers(w http.ResponseWriter, r *http.Request) {
-	servers := h.orchestrator.ListServers()
+	labelFilters := parseLabelFilters(r)
+	servers := h.orchestrator.ListServersByLabels(labelFilters)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(ToServerListResponse(servers))
+}
+
+// parseLabelFilters extracts label=key:value query params and returns them as a map.
+func parseLabelFilters(r *http.Request) map[string]string {
+	values := r.URL.Query()["label"]
+	if len(values) == 0 {
+		return nil
+	}
+	filters := make(map[string]string, len(values))
+	for _, v := range values {
+		parts := strings.SplitN(v, ":", 2)
+		if len(parts) == 2 {
+			filters[parts[0]] = parts[1]
+		}
+	}
+	if len(filters) == 0 {
+		return nil
+	}
+	return filters
 }
 
 func (h *Handler) GetServer(w http.ResponseWriter, r *http.Request) {
@@ -138,4 +166,53 @@ func (h *Handler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *Handler) GetServerHealth(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	health, err := h.orchestrator.ServerHealth(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrServerNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(health)
+}
+
+func (h *Handler) RecordHeartbeat(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.orchestrator.RecordHeartbeat(id); err != nil {
+		if errors.Is(err, orchestrator.ErrServerNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ExtendServer(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.orchestrator.ExtendServerTTL(id); err != nil {
+		if errors.Is(err, orchestrator.ErrServerNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, orchestrator.ErrServerNoTTL) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

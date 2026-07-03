@@ -48,7 +48,7 @@ func TestCreateServer(t *testing.T) {
 	cfg.Ports.RangeEnd = 25570
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 
-	s1, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s1, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating server: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestCreateServer(t *testing.T) {
 		t.Fatalf("server properties mismatch: %+v", s1)
 	}
 
-	s2, err := o.CreateServer(context.Background(), "minecraft", 5, "")
+	s2, err := o.CreateServer(context.Background(), "minecraft", 5, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating second server: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCreateServer(t *testing.T) {
 	}
 
 	// Max servers reached
-	s3, err := o.CreateServer(context.Background(), "minecraft", 5, "")
+	s3, err := o.CreateServer(context.Background(), "minecraft", 5, "", 0, "", nil)
 	if !errors.Is(err, ErrMaxServersReached) {
 		t.Fatalf("expected ErrMaxServersReached, got %v", err)
 	}
@@ -84,17 +84,17 @@ func TestCreateServer_NoPorts(t *testing.T) {
 	cfg.Ports.RangeEnd = 25566 // Only 2 ports
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 
-	_, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	_, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating server 1: %v", err)
 	}
-	_, err = o.CreateServer(context.Background(), "minecraft", 10, "")
+	_, err = o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error creating server 2: %v", err)
 	}
 
 	// No ports available
-	s3, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s3, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if !errors.Is(err, ErrNoPortsAvailable) {
 		t.Fatalf("expected ErrNoPortsAvailable, got %v", err)
 	}
@@ -107,8 +107,8 @@ func TestGetAndListServers(t *testing.T) {
 	cfg := mockConfig()
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 
-	s1, _ := o.CreateServer(context.Background(), "minecraft", 10, "")
-	s2, _ := o.CreateServer(context.Background(), "minecraft", 5, "")
+	s1, _ := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
+	s2, _ := o.CreateServer(context.Background(), "minecraft", 5, "", 0, "", nil)
 
 	s, found := o.GetServer(s1.ID)
 	if !found {
@@ -154,7 +154,7 @@ func TestCreateServer_RaceCondition(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			defer wg.Done()
-			s, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+			s, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 			if err != nil {
 				errs <- err
 				return
@@ -183,7 +183,7 @@ func TestCreateServer_Backpressure(t *testing.T) {
 	o.jobQueue = make(chan *domain.Server, 1)
 
 	// Fill the queue
-	_, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	_, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("Failed to create first server: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestCreateServer_Backpressure(t *testing.T) {
 	// Try to create another one, should return error instead of blocking
 	errChan := make(chan error, 1)
 	go func() {
-		_, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+		_, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 		errChan <- err
 	}()
 
@@ -213,8 +213,8 @@ func TestMultipleWorkers(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 	o.StartWorkers()
 
-	s1, _ := o.CreateServer(context.Background(), "game1", 10, "")
-	s2, _ := o.CreateServer(context.Background(), "game2", 10, "")
+	s1, _ := o.CreateServer(context.Background(), "game1", 10, "", 0, "", nil)
+	s2, _ := o.CreateServer(context.Background(), "game2", 10, "", 0, "", nil)
 
 	// Wait for workers to process.
 	time.Sleep(250 * time.Millisecond)
@@ -233,7 +233,7 @@ func TestStopRunningServer(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 	o.StartWorkers()
 
-	s, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestStopStartingServer(t *testing.T) {
 	cfg.Orchestrator.Workers = 1
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 
-	s, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestShutdownServer(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, &MockDockerClient{})
 
 	t.Run("Success", func(t *testing.T) {
-		s, _ := o.CreateServer(context.Background(), "minecraft", 10, "")
+		s, _ := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 		_ = s.Transition(domain.EventStart)
 		_ = s.Transition(domain.EventRun)
 
@@ -312,7 +312,7 @@ func TestShutdownServer(t *testing.T) {
 	})
 
 	t.Run("NotRunning", func(t *testing.T) {
-		s, _ := o.CreateServer(context.Background(), "minecraft", 10, "")
+		s, _ := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 		// State is Pending
 
 		err := o.ShutdownServer(context.Background(), s.ID)
@@ -343,7 +343,7 @@ func TestStartupTimeout(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, mock)
 	o.StartWorkers()
 
-	s, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestStartupTimeout_RaceCondition(t *testing.T) {
 	o, _ := NewOrchestrator(cfg, mock)
 	o.StartWorkers()
 
-	s, err := o.CreateServer(context.Background(), "minecraft", 10, "")
+	s, err := o.CreateServer(context.Background(), "minecraft", 10, "", 0, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
