@@ -1,5 +1,5 @@
 # Variables
-main_package_path = ./cmd/minestrate
+main_package_path = .
 binary_name = main
 docker_image = minestrate-app
 

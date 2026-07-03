@@ -11,10 +11,10 @@ Isolated Minecraft minigame servers, on demand. REST API over Docker, written in
 # 1. Clone and build
 git clone https://github.com/mitsuakki/minestrate
 cd minestrate
-go build -o minestrate ./cmd/minestrate
+go build -o minestrate .
 
 # 2. Configure
-cp config/config.example.yaml minestrate.yaml
+cp minestrate.example.yaml minestrate.yaml
 # edit minestrate.yaml
 
 # 3. Run
