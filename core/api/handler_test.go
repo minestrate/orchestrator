@@ -101,36 +101,6 @@ func TestCreateServer(t *testing.T) {
 	})
 }
 
-func TestCreateNetwork(t *testing.T) {
-	h := setupTestHandler()
-
-	t.Run("ValidRequest", func(t *testing.T) {
-		reqBody := CreateNetworkRequest{Name: "my-custom-net", Subnet: "172.22.0.0/24"}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/networks", bytes.NewBuffer(body))
-		w := httptest.NewRecorder()
-
-		h.CreateNetwork(w, req)
-
-		if w.Code != http.StatusCreated {
-			t.Errorf("Expected status 201, got %d", w.Code)
-		}
-	})
-
-	t.Run("MissingName", func(t *testing.T) {
-		reqBody := CreateNetworkRequest{Name: ""}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/networks", bytes.NewBuffer(body))
-		w := httptest.NewRecorder()
-
-		h.CreateNetwork(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("Expected status 400, got %d", w.Code)
-		}
-	})
-}
-
 func TestListServersWithLabels(t *testing.T) {
 	h := setupTestHandler()
 

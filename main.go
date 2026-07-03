@@ -84,8 +84,6 @@ func main() {
 	r.Post("/servers", redirectV1)
 	r.Post("/servers/*", redirectV1)
 	r.Delete("/servers/*", redirectV1)
-	r.Post("/networks", redirectV1)
-
 	r.Route("/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(api.Auth(cfg.Auth.JWTSecret))
@@ -98,7 +96,6 @@ func main() {
 			r.Post("/servers/{id}/extend", h.ExtendServer)
 			r.Delete("/servers/{id}", h.DeleteServer)
 			r.With(api.RequireScope("server:create")).Post("/servers", h.CreateServer)
-			r.With(api.RequireScope("server:create")).Post("/networks", h.CreateNetwork)
 
 			// Admin endpoints.
 			r.With(api.RequireScope("admin")).Get("/admin/backup", h.AdminBackup)

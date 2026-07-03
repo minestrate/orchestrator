@@ -91,32 +91,6 @@ func (h *Handler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ToServerResponse(s))
 }
 
-func (h *Handler) CreateNetwork(w http.ResponseWriter, r *http.Request) {
-	var req CreateNetworkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "network name is required", http.StatusBadRequest)
-		return
-	}
-
-	err := h.orchestrator.CreateNetwork(r.Context(), req.Name, req.Subnet)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":       "created",
-		"network_name": req.Name,
-	})
-}
-
 func (h *Handler) ListServers(w http.ResponseWriter, r *http.Request) {
 	labelFilters := parseLabelFilters(r)
 	limit, offset := parsePagination(r)

@@ -15,11 +15,6 @@ type CreateServerRequest struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 }
 
-type CreateNetworkRequest struct {
-	Name   string `json:"name"`
-	Subnet string `json:"subnet,omitempty"`
-}
-
 type ServerResponse struct {
 	ID      string             `json:"id"`
 	Game    string             `json:"game"`
