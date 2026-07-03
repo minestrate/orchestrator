@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,14 +28,14 @@ func main() {
 
 	if len(os.Args) < 2 && *configPath == "minestrate.yaml" {
 		if _, err := os.Stat(*configPath); os.IsNotExist(err) {
-			fmt.Println("Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.")
-			fmt.Printf("Default config 'minestrate.yaml' not found. Use --config to specify a path.\n")
+			fmt.Fprintf(os.Stderr, "Isolated Minecraft minigame servers, on demand. REST API over Docker, written in Go.\n")
+			fmt.Fprintf(os.Stderr, "Default config 'minestrate.yaml' not found. Use --config to specify a path.\n")
 			return
 		}
 	}
 
 	if *version {
-		fmt.Println("Version: dev")
+		fmt.Fprintf(os.Stdout, "Version: dev\n")
 		return
 	}
 
@@ -44,14 +45,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var handler slog.Handler
-	if cfg.Env == "prod" {
-		handler = slog.NewJSONHandler(os.Stdout, nil)
-	} else {
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		})
-	}
+	logLevel := slogLevelFromEnv()
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 	slog.SetDefault(slog.New(handler))
 
 	if cfg.Env == "dev" {
@@ -71,7 +66,7 @@ func main() {
 		if err != nil {
 			slog.Error("failed to generate dev token", "error", err)
 		} else {
-			fmt.Printf("Dev JWT: %s\n", ss)
+			fmt.Fprintf(os.Stdout, "Dev JWT: %s\n", ss)
 		}
 	} else if cfg.Env == "prod" {
 		if cfg.Auth.JWTSecret == "this-is-a-very-long-secret-key-32-bytes" {
@@ -81,6 +76,7 @@ func main() {
 	}
 
 	r := chi.NewRouter()
+	r.Use(requestLogger)
 
 	var dockerClient dockerclient.Client
 	if cfg.Env == "dev" && cfg.Docker.Socket == "" {
@@ -163,4 +159,56 @@ func main() {
 
 	o.ShutdownAll(shutdownCtx)
 	slog.Info("Exit.")
+}
+
+// slogLevelFromEnv reads LOG_LEVEL and returns the corresponding slog.Level.
+func slogLevelFromEnv() slog.Level {
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// requestLogger is a chi middleware that logs every HTTP request.
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(ww, r)
+		duration := time.Since(start).Microseconds()
+
+		slog.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.status,
+			"duration_ms", float64(duration)/1000.0,
+			"player_sub", playerSubject(r),
+		)
+	})
+}
+
+// playerSubject extracts the JWT subject from the request context.
+func playerSubject(r *http.Request) string {
+	claims, ok := r.Context().Value(api.ClaimsKey).(*api.Claims)
+	if !ok || claims == nil {
+		return ""
+	}
+	return claims.Subject
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code.
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
 }

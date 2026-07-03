@@ -9,9 +9,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type contextKey string
+// ContextKey is the type for context keys used in the API package.
+type ContextKey string
 
-const ClaimsKey contextKey = "claims"
+// ClaimsKey is the context key for JWT claims injected by the Auth middleware.
+const ClaimsKey ContextKey = "claims"
 
 type Claims struct {
 	Scope []string `json:"scope"`
