@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 var allStates = []ServerState{
@@ -85,5 +86,77 @@ func TestInvalidTransitions(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHeartbeatInitialAge(t *testing.T) {
+	s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+	s.HeartbeatTimeout = 10 * time.Second
+
+	if age := s.HeartbeatAge(); age != 0 {
+		t.Fatalf("initial heartbeat age should be 0, got %v", age)
+	}
+	if s.IsHeartbeatStale() {
+		t.Fatal("initial heartbeat should not be stale")
+	}
+}
+
+func TestHeartbeatRecordAndAge(t *testing.T) {
+	s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+	s.HeartbeatTimeout = 10 * time.Second
+
+	s.RecordHeartbeat()
+
+	age := s.HeartbeatAge()
+	if age <= 0 {
+		t.Fatalf("heartbeat age should be > 0 after recording, got %v", age)
+	}
+	if s.IsHeartbeatStale() {
+		t.Fatal("fresh heartbeat should not be stale")
+	}
+}
+
+func TestTTLExpiry(t *testing.T) {
+	s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+
+	// No TTL: never expires.
+	if s.IsExpired() {
+		t.Fatal("server without TTL should not be expired")
+	}
+
+	// Set TTL and check expiry.
+	s.TTLSeconds = 1
+	s.ExpiresAt = time.Now().Add(-1 * time.Second) // expired 1s ago
+	if !s.IsExpired() {
+		t.Fatal("server with past expiry should be expired")
+	}
+
+	// Extend TTL.
+	s.ExtendTTL()
+	if s.IsExpired() {
+		t.Fatal("server should not be expired after ExtendTTL")
+	}
+	if s.ExpiresAt.Before(time.Now()) {
+		t.Fatal("ExpiresAt should be in the future after ExtendTTL")
+	}
+
+	// Zero TTL: ExtendTTL is a no-op.
+	s.TTLSeconds = 0
+	oldExpiry := s.ExpiresAt
+	s.ExtendTTL()
+	if !s.ExpiresAt.Equal(oldExpiry) {
+		t.Fatal("ExtendTTL with TTLSeconds=0 should not change ExpiresAt")
+	}
+}
+
+func TestHeartbeatStale(t *testing.T) {
+	s := NewServer("test", "skywars", 8, "127.0.0.1", 19132)
+	s.HeartbeatTimeout = 1 * time.Nanosecond
+
+	s.RecordHeartbeat()
+	time.Sleep(10 * time.Millisecond)
+
+	if !s.IsHeartbeatStale() {
+		t.Fatal("heartbeat should be stale after timeout")
 	}
 }
