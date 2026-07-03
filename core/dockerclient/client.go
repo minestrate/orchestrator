@@ -7,7 +7,6 @@ package dockerclient
 import (
 	"context"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -24,7 +23,7 @@ type Client interface {
 	ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
 	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
 	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
-	ContainerList(ctx context.Context, options container.ListOptions) ([]types.Container, error)
+	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 }
 
 // MockClient is a no-op implementation of Client for development and testing.
@@ -68,6 +67,6 @@ func (m *MockClient) ContainerInspect(_ context.Context, _ string) (container.In
 	}, nil
 }
 
-func (m *MockClient) ContainerList(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+func (m *MockClient) ContainerList(_ context.Context, _ container.ListOptions) ([]container.Summary, error) {
 	return nil, nil
 }
